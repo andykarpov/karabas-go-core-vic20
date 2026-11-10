@@ -1,0 +1,37 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+A Commodore VIC-20 core (6502, VIC 6561 PAL / 6560 NTSC, two 6522 VIAs, RAM expansions 3K-35K, cartridges, Mega-Cart, C1541 drive with D64, C1530 datasette with TAP) for the Karabas Go, Mini and Mini G boards (Xilinx Spartan-6 XC6SLX25, ISE 14.7, XST): a port of [VIC20Nano](https://github.com/MiSTle-Dev/VIC20Nano) (MiSTle-Dev, Tang boards), itself the MiST / MiSTer VIC-20 of MikeJ / WoS with the C1541 of darfpga.
+
+Status: plan only (2026-11-11), next phase 0 (import + XST fit). Docs, in Russian: `docs/PLAN.md` (research, decisions, phases). Follow the phases; record a changed decision in PLAN.md. Decisions still open are listed at its end: ask the user, do not assume.
+
+All file work goes through the firmware (OSD, `FL` / `F` items, `img_sdc`): no loader or soft CPU in the core. Upstream's `loader_sd_card.sv` (files read by the FPGA from SD slots) is replaced by `FL` items (`kg_mcu` ROMLOAD); its MiSTle glue (`sysctrl.v`, `sd_card.v`, `mcu_spi.v`, `hid.v`, `osd_u8g2.v`, `flash*.v`) is not used: `img_sdc` gives the `sd_lba` / `sd_rd` / `sd_wr` / `sd_byte_index` interface that `c1541_sd` expects, as in core-nanomig.
+
+Templates: `../karabas-go-core-nanomig` (MiSTle sdc interface on `img_sdc`, `FL` ROM loading, SRAM controller of the two 2Mx8 chips), `../karabas-go-core-atarist` (MiSTeryNano port: sv2v flow, Makefile, sim harness), `../karabas-go-core-archie` (latest Makefile / sim / HID layout), `../karabas-go-core-apple2` (newest plan / phase layout, same T65 / via6522 family).
+
+## Layout (planned, phase 0 creates it)
+
+- `upstream/`: VIC20Nano as imported (reference, not built).
+- `src/rtl/`: the machine, C1541, C1530, Mega-Cart; changes marked `-- karabas:` / `// karabas:`; `src/rtl/karabas/`: our parts (`vic20_hid.v`, `vic20_sram.v`, ...).
+- `src/Makefile`: the ISE flow as in core-atarist / core-archie (`make minig`, `make minig-xst`, `make vic20-xst` = the machine + C1541 alone).
+- `src/core.json`: kgo2 description (`vic20.kg`). `src/make_core.py`: symlink to `../../karabas-go-tools/make_core/make_core.py`.
+- `modules/`: the git submodule [karabas-go-modules](https://github.com/andykarpov/karabas-go-modules). Clone with `--recursive`. A change to a module is made there (branch + PR) and taken here by moving the submodule commit.
+
+## Rules of the core
+
+The rules of core-atarist / core-archie apply: standard-ish video timing with syncs always present (check the user's monitor), `FT_CLK_OUT` about 8 MHz on Mini / Mini G, Go `FDC_*` outputs 0 (the Go floppy port is Shugart, a 1541 is an IEC drive), OSD switch index = item position unless `"index"`, an OSD value shows 10 characters at most, FL slots 0..7 only (one array with the F slots), Verilog-2001 for XST (`sv2v` for SV), imported code marked `karabas:`.
+
+- Mini / Mini G tops drive T3 (`FLASH_CS_N`) = 0: on Mini G2 it is the SDRAM ~CS.
+- Gowin primitives (`gowin_prom`, `gowin_sp`, `gowin_dpb`, `gowin_sdpb`, `rPLL`, `fifo_sc_hs`) are replaced by `kg_spram` / `kg_sdpram` / `kg_tdpram`-style inferred RAMs from `modules/rtl/mem` and `kg_pll` / `kg_dcm`.
+- XST: instantiate VHDL entities with `entity work.x` (Quartus accepts `x : work.x`); declare Verilog nets before use; no declarations in unnamed blocks; no aggregates on ports of Verilog modules; VHDL-2008 `process (all)` is not accepted (list the signals).
+- XST silently removes a register with neither reset nor initial value whose way out of idle depends on itself (see atarist `fdc1772`): when imported logic works in sim and not on the board, read Xst:1710 / 2404 in the `.syr` first.
+- **Ask the user before every check on the board** (and the HDMI capture), even inside a phase; bench only through `hwq`. Ask before a firmware flash.
+- One branch per phase of `docs/PLAN.md`, one PR at its end.
+- Heavy builds: Mini G only while working on one feature, all boards for a release. Long sims via `job run` + Monitor on `job watch`, minutes-long runs only after asking.
+
+## Memory
+
+The Claude Code memory of this repo is shared with all karabas-go repos: `~/.claude/projects/<this project>/memory` is a symlink to `../karabas-go-notes` (private repo `andykarpov/karabas-go-notes`). Its `MEMORY.md` is split by repo; commit and push it after every memory change.
