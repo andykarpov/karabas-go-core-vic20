@@ -32,7 +32,7 @@ module vic20_tape #(
 	input wire clk,
 	input wire reset,            // the machine
 
-	input wire file_active,
+	input wire file_active,      // file_on of vic20_loader (the slot known)
 	input wire [7:0] file_slot,
 	input wire [31:0] file_addr,
 	input wire [7:0] file_data,

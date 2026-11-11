@@ -20,9 +20,11 @@
 
  Files (FL items, vic20_loader): PRG (slot 1, injected), Cartridge (slot 2), Kernal (slot 4),
  Tape (slot 3: the .tap file in the SRAM from 1 MB, vic20_tape plays it into the C1530),
- Mega-Cart (slot 5: the 2 MB ROM in the SRAM from 2 MB, megacart.v of upstream maps it; its NVRAM
- in the SRAM at 0F0000, not saved, as upstream), 1541 DOS (slot 6: a DOS ROM file for the drive).
- SRAM map (bytes): 000000 the VIC space, 0F0000 NVRAM, 100000 tape, 200000 Mega-Cart ROM.
+ Mega-Cart (slot 5: the 2 MB ROM in the SRAM from 2 MB, megacart.v of upstream maps it; its 8K
+ NVRAM in block RAM, vic20_nvram: kept in the file of the F item MC NVRAM, slot 7),
+ 1541 DOS (slot 6: a DOS ROM file for the drive).
+ SRAM map (bytes): 000000 the VIC space, 0F0000 NVRAM (written, no longer read), 100000 tape,
+ 200000 Mega-Cart ROM.
  Mouse: Paddles = the two paddles of the VIC (x / y), the buttons their fire (joy left / right).
  Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through img_sdc.
 
@@ -211,7 +213,7 @@ wire ms_upd;
 wire rom_active, rom_wr;
 wire [31:0] rom_addr;
 wire [7:0] rom_data;
-wire file_reset, file_active, file_wr;
+wire file_reset, file_active, file_wr, file_on;
 wire [7:0] file_slot, file_data;
 wire [31:0] file_addr;
 wire [15:0] softsw_command, osd_command;
@@ -420,6 +422,7 @@ vic20_loader loader (
 	.reset(areset),
 	.file_reset(file_reset),
 	.file_active(file_active),
+	.file_on(file_on),
 	.file_slot(file_slot),
 	.file_addr(file_addr),
 	.file_data(file_data),
@@ -451,7 +454,7 @@ wire [1:0] tap_version;
 vic20_tape tape (
 	.clk(clk_sys),
 	.reset(vic_reset),
-	.file_active(file_active),
+	.file_active(file_on),
 	.file_slot(file_slot),
 	.file_addr(file_addr),
 	.file_data(file_data),
@@ -487,6 +490,13 @@ wire [2:0] sdc_slot;
 wire [8:0] sdc_byte_addr;
 wire [7:0] sdc_byte_in_data, disk_out_data;
 wire img_active;
+// the NVRAM of the Mega-Cart (index 7): its sector while only it asks (index 0, the drive, goes
+// first in img_sdc), its bytes while its request runs
+wire nv_rd, nv_wr;
+wire [3:0] nv_sector;
+wire [7:0] nv_out_data;
+wire [31:0] sdc_sector = (disk_rd || disk_wr) ? disk_lba : { 28'd0, nv_sector };
+wire [7:0] sdc_out_data = (sdc_slot == 3'd7) ? nv_out_data : disk_out_data;
 
 img_sdc #(.OUT_LATENCY(2)) img_sdc (
 	.clk(clk_sys),
@@ -506,9 +516,9 @@ img_sdc #(.OUT_LATENCY(2)) img_sdc (
 
 	.sdc_img_mounted(sdc_img_mounted),
 	.sdc_img_size(sdc_img_size),
-	.sdc_rd({ 7'd0, disk_rd }),
-	.sdc_wr({ 7'd0, disk_wr }),
-	.sdc_sector(disk_lba),
+	.sdc_rd({ nv_rd, 6'd0, disk_rd }),
+	.sdc_wr({ nv_wr, 6'd0, disk_wr }),
+	.sdc_sector(sdc_sector),
 	.sdc_busy(sdc_busy),
 	.sdc_done(sdc_done),
 	.sdc_error(sdc_error),
@@ -516,7 +526,7 @@ img_sdc #(.OUT_LATENCY(2)) img_sdc (
 	.sdc_byte_in_strobe(sdc_byte_in_strobe),
 	.sdc_byte_addr(sdc_byte_addr),
 	.sdc_byte_in_data(sdc_byte_in_data),
-	.sdc_byte_out_data(disk_out_data),
+	.sdc_byte_out_data(sdc_out_data),
 
 	.active(img_active)
 );
@@ -545,7 +555,7 @@ wire restore_n, fire_n;
 wire [3:0] joy_n;
 wire extmem_sel, extmem_r_wn;
 wire [15:0] extmem_addr;
-wire [7:0] extmem_din, extmem_dout;
+wire [7:0] extmem_din, extmem_dout, sram_cdata, nv_cdata;
 // a Mega-Cart maps all of the expansion space itself (upstream: ram_ext 11111, no ro blocks)
 wire [4:0] ram_ext = mc_loaded ? 5'b11111 : (ram_sw | cart_blk);
 wire [4:0] ram_ext_ro = mc_loaded ? 5'b00000 : cart_blk;
@@ -675,10 +685,35 @@ wire [21:0] mc_sram_addr = mc_nvram_sel ? { 9'h00F, extmem_addr[12:0] } :   // 0
 wire [21:0] ext_sram_addr = mc_loaded ? mc_sram_addr : { 6'd0, extmem_addr };
 wire ext_we = mc_loaded ? (extmem_sel && !mc_wr_n) : (extmem_sel && !extmem_r_wn && !ext_ro);
 
+// the NVRAM in block RAM (the 6502 takes its data at the end of its cycle: one clock of the RAM
+// is in time), its writes as those of the SRAM
+wire nv_sel = mc_loaded && mc_nvram_sel;
+assign extmem_din = nv_sel ? nv_cdata : sram_cdata;
+vic20_nvram #(.SLOT(3'd7)) nvram (
+	.clk(clk_sys),
+	.m_addr(extmem_addr[12:0]),
+	.m_we(ext_we && nv_sel),
+	.m_din(extmem_dout),
+	.m_dout(nv_cdata),
+	.mounted(sdc_img_mounted[7]),
+	.size(sdc_img_size[31:0]),
+	.rd(nv_rd),
+	.wr(nv_wr),
+	.sector(nv_sector),
+	.busy(sdc_busy),
+	.done(sdc_done),
+	.slot(sdc_slot),
+	.byte_in_strobe(sdc_byte_in_strobe),
+	.byte_addr(sdc_byte_addr),
+	.byte_in_data(sdc_byte_in_data),
+	.byte_out_data(nv_out_data),
+	.have()
+);
+
 vic20_sram sram (
 	.clk(clk_sys),
 	.caddr(ext_sram_addr),
-	.cdata(extmem_din),
+	.cdata(sram_cdata),
 	.cwe(ext_we),
 	.cwdata(extmem_dout),
 	.treq(treq),

@@ -10,7 +10,7 @@
  SRAM meanwhile (its data unchanged).
  The PLAY key of c1530 is a toggle (modelled: sense, reset to STOP by tap_restart): the file is
  loaded with file_active dropping once in the middle (as a firmware may do), and the tape must
- still end at PLAY.
+ still end at PLAY. A PRG after the tape (its slot sent after file_active) leaves the tape as it is.
 */
 
 module tb_tape;
@@ -27,12 +27,12 @@ wire [15:0] conf_ai;
 wire [21:0] laddr, taddr;
 wire [7:0] conf_di, lwdata, tdata;
 wire [4:0] cart_blk;
-wire treq, tack;
+wire treq, tack, file_on;
 
 vic20_loader loader (
 	.clk(clk), .reset(1'b0),
 	.file_reset(file_reset), .file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
-	.file_wr(file_wr), .eject(1'b0),
+	.file_wr(file_wr), .eject(1'b0), .file_on(file_on),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
 	.cart_blk(cart_blk), .hold_reset(hold_reset),
@@ -47,7 +47,7 @@ wire tap_wrfull = fifo_n == 10'd512;
 
 vic20_tape tape (
 	.clk(clk), .reset(1'b0),
-	.file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
+	.file_active(file_on), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
 	.file_wr(file_wr), .play(play_key),
 	.treq(treq), .taddr(taddr), .tdata(tdata), .tack(tack),
 	.tap_restart(tap_restart), .tap_version(tap_version), .tap_data(tap_data), .tap_wrreq(tap_wrreq),
@@ -162,6 +162,21 @@ initial begin
 	@(negedge clk) release tape.restart;
 	repeat (10000) @(posedge clk);
 	if (sense !== 1'b0) begin $display("ERROR: STOP after a restart with the key down"); errors = errors + 1; end
+	// another file after the tape (a PRG: IOCTL_STATE 1 with the tape slot still on, then the slot):
+	// the tape keeps its length
+	@(negedge clk) file_active = 1'b1;
+	repeat (4) @(posedge clk);
+	@(negedge clk) begin file_slot = 8'd1; file_reset = 1'b1; end
+	@(negedge clk) file_reset = 1'b0;
+	for (i = 0; i < 4; i = i + 1) begin
+		file_addr = i; file_data = 8'h10;
+		@(negedge clk) file_wr = 1'b1;
+		@(negedge clk) file_wr = 1'b0;
+		repeat (6) @(posedge clk);
+	end
+	@(negedge clk) file_active = 1'b0;
+	repeat (100) @(posedge clk);
+	if (tape.last !== 21'd1500) begin $display("ERROR: tape length %0d after a PRG, want 1500", tape.last); errors = errors + 1; end
 	$display("tb_tape: %0d errors", errors);
 	$finish;
 end

@@ -9,6 +9,9 @@
     others in the SRAM; then the pointers $2D..$32, $AE/$AF = the end address
  2. a cartridge at $A000 (8K + 2): all in the SRAM, cart_blk = $A000, hold_reset while it loads;
     eject clears cart_blk
+ 2b. a cartridge of two files ($2000, $A000): the blocks add up; a file on a taken block: a new
+     cartridge (the old blocks go)
+ 2c. a PRG after it: no hold_reset while the slot of the cartridge is still on file_slot
  3. a Kernal (8K, no header): conf writes at $E000..$FFFF
  3b. a 32K DOS image (slot 6): dos_* writes, its last 16K stay; disk_hold while it loads
  3c. a Mega-Cart (slot 5, 4K of it here): mc_loaded, hold_reset, laddr from $200000, a
@@ -130,7 +133,7 @@ task check;
 endtask
 
 reg [15:0] a;
-reg ok;
+reg ok, saw_hold;
 initial begin
 	repeat (10) @(posedge clk);
 
@@ -165,6 +168,25 @@ initial begin
 	@(negedge clk) eject = 1'b0;
 	@(posedge clk);
 	check(cart_blk == 5'd0, "eject clears the blocks");
+
+	// 2b. a cartridge of two files: $2000 then $A000 add up; $A000 again is a new cartridge
+	send_file(8'd2, 16'h2000, 1'b1, 16'h0020);
+	send_file(8'd2, 16'hA000, 1'b1, 16'h0020);
+	check(cart_blk == 5'b10010, "two cartridge files: $2000 + $A000");
+	send_file(8'd2, 16'hA000, 1'b1, 16'h0020);
+	check(cart_blk == 5'b10000, "a taken block: a new cartridge");
+
+	// 2c. a PRG after the cartridge: while its slot is not yet sent, file_slot is the cartridge's
+	// (the firmware order): hold_reset must stay low (26111109 reset the machine, the PRG lost)
+	saw_hold = 1'b0;
+	fork
+		send_file(8'd1, 16'h1001, 1'b1, 16'h0010);
+		begin : watch
+			repeat (2000) begin @(posedge clk); if (hold_reset) saw_hold = 1'b1; end
+		end
+	join
+	check(!saw_hold, "no hold_reset for a PRG after a cartridge");
+	check(conf_seen[16'h1001], "the PRG after a cartridge is written");
 
 	// 3. Kernal, 8K without a header
 	send_file(8'd4, 16'h0000, 1'b0, 16'h2000);
