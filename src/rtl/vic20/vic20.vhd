@@ -100,6 +100,7 @@ entity VIC20 is
 		i_wide       : in  std_logic;
 		--
 		ps2_key      : in  std_logic_vector(10 downto 0);
+		i_restore_n  : in  std_logic := '1'; -- karabas: the RESTORE key (VIA1 CA1), low = pressed
   	keyboard_matrix_out : out  std_logic_vector(7 downto 0);
 	  keyboard_matrix_in  :  in  std_logic_vector(7 downto 0);
 		tape_play    : out std_logic;
@@ -495,7 +496,7 @@ begin
   keybd_col_out_s <= keybd_col_out or not keybd_col_oe;
 
   reset_key <= '0';
-  keybd_restore <= '0';
+  keybd_restore <= i_restore_n; -- karabas: was '0' (not wired in upstream); CA1 takes the falling edge
   tape_play <= '0';
 
 keyboard_inst: entity work.vic20_keyboard

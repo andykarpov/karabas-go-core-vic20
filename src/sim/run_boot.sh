@@ -10,6 +10,7 @@ SRC=..
 mkdir -p build
 VHD=$(sed -n 's/^vhdl work "\(.*\)"/\1/p' $SRC/vic20.prj | sed "s#^#$SRC/#")
 VLOG=$(sed -n 's/^verilog work "\(.*\)"/\1/p' $SRC/vic20.prj)
+VLOG="$VLOG rtl/sv2v/scandoubler.v"
 NET=build/vic20_core_ghdl.v
 if [ ! -f $NET ] || [ -n "$(find $VHD vhdl2v.sh bb_comp.py -newer $NET 2>/dev/null)" ]; then
 	./vhdl2v.sh build > build/ghdl.log 2>&1 || { grep -v warning build/ghdl.log | tail -30; exit 1; }

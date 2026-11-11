@@ -44,7 +44,7 @@ entity vic20_core is
     -- keyboard matrix (vic20_keyboard: out = column select, in = rows, low active)
     kbd_matrix_out: out std_logic_vector(7 downto 0);
     kbd_matrix_in : in  std_logic_vector(7 downto 0);
-    restore_n     : in  std_logic;  -- not wired by upstream yet (keybd_restore = 0)
+    restore_n     : in  std_logic;  -- the RESTORE key, low = pressed (VIA1 CA1 -> NMI)
 
     -- joystick (low active: 0 up, 1 down, 2 left, 3 right), fire, paddles
     joy_n         : in  std_logic_vector(3 downto 0);
@@ -209,6 +209,7 @@ begin
       i_wide        => wide,
 
       ps2_key       => (others => '0'),
+      i_restore_n   => restore_n,
       keyboard_matrix_out => kbd_matrix_out,
       keyboard_matrix_in  => kbd_matrix_in,
       tape_play     => open,
