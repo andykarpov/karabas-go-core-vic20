@@ -292,6 +292,8 @@ end component;
 signal char_rom_addr      : std_logic_vector(11 downto 0); -- karabas
 signal basic_rom_addr     : std_logic_vector(12 downto 0); -- karabas
 signal kernal_conf_addr   : std_logic_vector(12 downto 0); -- karabas
+signal ntsc_rom_dout_rom  : std_logic_vector(7 downto 0); -- karabas
+signal kernal_user        : std_logic := '0'; -- karabas: a Kernal file was loaded
 
 
 begin
@@ -839,7 +841,28 @@ port map (
 
   ntsc_rom_dout_dl <= "11111111";
   pal_rom_dout_dl <= "11111111";
-  ntsc_rom_dout_o <= pal_rom_dout_o;
+  -- karabas: the NTSC Kernal 901486-06 in its own ROM (upstream gave the PAL Kernal to both:
+  -- the screen origin of the PAL Kernal puts the picture of the 6560 off to the right and down).
+  -- A Kernal file (conf $E000) replaces both.
+  process (conf_clk)
+  begin
+    if rising_edge(conf_clk) then
+      if conf_en_s = '1' then
+        kernal_user <= '1';
+      end if;
+    end if;
+  end process;
+
+  ntsc_kernal_rom : kg_sprom
+      generic map (DW => 8, AW => 13, INIT_FILE => "rom/kernal.901486-06.hex")
+      port map (
+          clk  => i_sysclk,
+          en   => '1',
+          addr => basic_rom_addr,
+          dout => ntsc_rom_dout_rom
+      );
+
+  ntsc_rom_dout_o <= pal_rom_dout_o when kernal_user = '1' else ntsc_rom_dout_rom;
 
 --	kernal_loadable_rom_gw5a: entity work.Gowin_SDPB_kernal_8k_gw5a
 --    port map (
