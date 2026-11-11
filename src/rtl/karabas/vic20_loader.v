@@ -25,6 +25,10 @@
    1541 DOS (SLOT_DOS): a 16K DOS ROM of the C1541 (e.g. JiffyDOS; a 32K image: its last 16K)
        on dos_*; the drive held in reset while it loads (disk_hold).
 
+ A new file is file_reset (IOCTL_SLOT, one clock, file_slot valid with it): the firmware sends
+ IOCTL_STATE 1 (file_active) before IOCTL_SLOT, so at the rising edge of file_active file_slot is
+ still the one of the previous file (26111106: a Mega-Cart after a PRG never set mc_loaded).
+
  Where a byte goes: conf_* (clk_sys) writes the block RAM of the machine (0000-03FF, 1000-1FFF,
  the colour RAM 9400-97FF, the Kernal E000-FFFF); the SRAM (lwe) has the expansions 0400-0FFF,
  2000-7FFF and A000-BFFF.
@@ -44,6 +48,7 @@ module vic20_loader #(
 	input wire clk,
 	input wire reset,
 
+	input wire file_reset,
 	input wire file_active,
 	input wire [7:0] file_slot,
 	input wire [31:0] file_addr,
@@ -167,11 +172,11 @@ always @(posedge clk) begin
 	end
 
 	// a new cartridge: the blocks of the old one go, and the Mega-Cart; a Mega-Cart: the blocks go
-	if (file_active && !active_d && is_cart) begin
+	if (file_reset && is_cart) begin
 		cart_blk <= 5'd0;
 		mc_loaded <= 1'b0;
 	end
-	if (file_active && !active_d && is_mega) begin
+	if (file_reset && is_mega) begin
 		cart_blk <= 5'd0;
 		mc_loaded <= 1'b1;
 	end

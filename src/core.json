@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "26111106",
+    "build": "26111107",
     "visible": true,
     "type": "osd",
     "order": 24,

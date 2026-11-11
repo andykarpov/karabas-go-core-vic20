@@ -22,7 +22,7 @@ module tb_loader;
 reg clk = 1'b0;
 always #14 clk = !clk;   // 35.7 MHz
 
-reg file_active = 1'b0, file_wr = 1'b0, eject = 1'b0;
+reg file_active = 1'b0, file_wr = 1'b0, eject = 1'b0, file_reset = 1'b0;
 reg [7:0] file_slot = 8'd0, file_data = 8'd0;
 reg [31:0] file_addr = 32'd0;
 
@@ -46,7 +46,7 @@ end
 
 vic20_loader dut (
 	.clk(clk), .reset(1'b0),
-	.file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
+	.file_reset(file_reset), .file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
 	.file_wr(file_wr), .eject(eject),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
@@ -100,8 +100,11 @@ task send_file;
 	input integer len;      // bytes after the header
 	integer k;
 	begin
-		file_slot = slot;
-		file_active = 1'b1;
+		// as the firmware (core_ioctl_send): IOCTL_STATE 1, then IOCTL_SLOT (file_reset + slot)
+		@(negedge clk) file_active = 1'b1;
+		repeat (4) @(posedge clk);
+		@(negedge clk) begin file_slot = slot; file_reset = 1'b1; end
+		@(negedge clk) file_reset = 1'b0;
 		repeat (4) @(posedge clk);
 		for (k = 0; k < len + (hdr ? 2 : 0); k = k + 1) begin
 			file_addr = k;

@@ -198,7 +198,7 @@ wire ms_upd;
 wire rom_active, rom_wr;
 wire [31:0] rom_addr;
 wire [7:0] rom_data;
-wire file_active, file_wr;
+wire file_reset, file_active, file_wr;
 wire [7:0] file_slot, file_data;
 wire [31:0] file_addr;
 wire [15:0] softsw_command, osd_command;
@@ -263,6 +263,7 @@ kg_mcu #(
 	.ROMLOAD_DATA(rom_data),
 	.ROMLOAD_WR(rom_wr),
 
+	.FILELOAD_RESET(file_reset),
 	.FILELOAD_ACTIVE(file_active),
 	.FILELOAD_ADDR(file_addr),
 	.FILELOAD_DATA(file_data),
@@ -404,6 +405,7 @@ wire [7:0] dos_data;
 vic20_loader loader (
 	.clk(clk_sys),
 	.reset(areset),
+	.file_reset(file_reset),
 	.file_active(file_active),
 	.file_slot(file_slot),
 	.file_addr(file_addr),

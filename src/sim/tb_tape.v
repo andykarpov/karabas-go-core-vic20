@@ -18,7 +18,7 @@ module tb_tape;
 reg clk = 1'b0;
 always #14 clk = !clk;
 
-reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0, play_key = 1'b0;
+reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0, play_key = 1'b0, file_reset = 1'b0;
 reg [7:0] file_slot = 8'd0, file_data = 8'd0;
 reg [31:0] file_addr = 32'd0;
 
@@ -31,7 +31,7 @@ wire treq, tack;
 
 vic20_loader loader (
 	.clk(clk), .reset(1'b0),
-	.file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
+	.file_reset(file_reset), .file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
 	.file_wr(file_wr), .eject(1'b0),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
@@ -120,8 +120,12 @@ end
 
 initial begin
 	repeat (10) @(posedge clk);
-	file_slot = 8'd3;
-	file_active = 1'b1;
+	// as the firmware: IOCTL_STATE 1 with the slot of the previous file, then IOCTL_SLOT
+	file_slot = 8'd1;
+	@(negedge clk) file_active = 1'b1;
+	repeat (4) @(posedge clk);
+	@(negedge clk) begin file_slot = 8'd3; file_reset = 1'b1; end
+	@(negedge clk) file_reset = 1'b0;
 	repeat (4) @(posedge clk);
 	for (i = 0; i < 1500; i = i + 1) begin
 		if (i == 700) begin   // the load drops for a while
