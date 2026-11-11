@@ -1,0 +1,6 @@
+https://github.com/MiSTle-Dev/VIC20Nano
+commit 9089828d8a21ea3075c0df9c87418b42766ab289 2026-03-21
+
+upstream/src/: src/ of that commit without the other Tang boards (only tang/nano20k, the reference
+top) and without the Windows tools (*.exe). Reference for the wiring, not built: the built copies
+with the karabas changes are in src/rtl/.
