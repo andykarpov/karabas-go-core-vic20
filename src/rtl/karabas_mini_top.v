@@ -138,6 +138,9 @@ assign UART_RX = 1'bz;
 assign UART_TX = 1'bz;
 assign UART_CTS = 1'bz;
 assign MIDI_TX = 1'b1;
+assign ADC_CLK = 1'b0;
+assign ADC_BCK = 1'bz;
+assign ADC_LRCK = 1'bz;
 
 assign FLASH_DI = 1'b1;
 assign FLASH_SCK = 1'b0;
