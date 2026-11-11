@@ -95,6 +95,7 @@ entity vic20_core is
     tap_data      : in  std_logic_vector(7 downto 0);
     tap_wrreq     : in  std_logic;
     tap_wrfull    : out std_logic;
+    tap_error     : out std_logic;  -- the FIFO ran empty while playing (the end of the tape)
     tap_play_stop : in  std_logic;  -- toggle
     cass_motor    : out std_logic;  -- 0 = motor on
     cass_sense    : out std_logic;
@@ -300,7 +301,7 @@ begin
       host_tap_in     => tap_data,
       host_tap_wrreq  => tap_wrreq,
       tap_fifo_wrfull => tap_wrfull,
-      tap_fifo_error  => open,
+      tap_fifo_error  => tap_error,
       osd_play_stop_toggle => tap_play_stop,
       cass_sense      => sense,
       cass_read       => tape_read,

@@ -19,6 +19,7 @@
        resets).
    Kernal (SLOT_KERNAL): 8K at $E000 of the Kernal RAM (conf $E000-$FFFF), the machine held in
        reset while it loads.
+   Tape (SLOT_TAPE): the whole .tap file into the SRAM from TAPE_BASE (vic20_tape plays it).
 
  Where a byte goes: conf_* (clk_sys) writes the block RAM of the machine (0000-03FF, 1000-1FFF,
  the colour RAM 9400-97FF, the Kernal E000-FFFF); the SRAM (lwe) has the expansions 0400-0FFF,
@@ -28,7 +29,10 @@
 module vic20_loader #(
 	parameter [7:0] SLOT_PRG = 8'd1,
 	parameter [7:0] SLOT_CART = 8'd2,
-	parameter [7:0] SLOT_KERNAL = 8'd4
+	parameter [7:0] SLOT_KERNAL = 8'd4,
+	parameter [7:0] SLOT_TAPE = 8'd3,
+	parameter [20:0] TAPE_BASE = 21'h100000,
+	parameter [20:0] TAPE_MAX = 21'h0FFFFF   // the last offset that fits (1 MB)
 ) (
 	input wire clk,
 	input wire reset,
@@ -45,7 +49,7 @@ module vic20_loader #(
 	output reg [7:0] conf_di = 8'd0,
 
 	output reg lwe = 1'b0,
-	output reg [15:0] laddr = 16'd0,
+	output reg [20:0] laddr = 21'd0,
 	output reg [7:0] lwdata = 8'd0,
 
 	output reg [4:0] cart_blk = 5'd0,   // $A000, $6000, $4000, $2000, $0400 (ram_ext order)
@@ -55,6 +59,7 @@ module vic20_loader #(
 wire is_prg = file_slot == SLOT_PRG;
 wire is_cart = file_slot == SLOT_CART;
 wire is_kernal = file_slot == SLOT_KERNAL;
+wire is_tape = file_slot == SLOT_TAPE;
 
 reg [15:0] addr = 16'd0;            // the next address of a PRG / cartridge
 reg active_d = 1'b0;
@@ -106,7 +111,7 @@ always @(posedge clk) begin
 		if ((is_prg || is_cart) && file_addr >= 32'd2) begin
 			if (is_prg ? addr < 16'hA000 : addr < 16'hC000) begin
 				if (in_sram(addr)) begin
-					laddr <= addr;
+					laddr <= { 5'd0, addr };
 					lwdata <= file_data;
 					lwe <= 1'b1;
 				end
@@ -119,6 +124,11 @@ always @(posedge clk) begin
 					cart_blk <= cart_blk | blk_of(addr);
 				addr <= addr + 16'd1;
 			end
+		end
+		if (is_tape && file_addr <= TAPE_MAX) begin
+			laddr <= TAPE_BASE + file_addr[20:0];
+			lwdata <= file_data;
+			lwe <= 1'b1;
 		end
 		// a Kernal file starts at offset 0 (no load address): the two first bytes too
 		if (is_kernal && file_addr < 32'd2) begin

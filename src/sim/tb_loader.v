@@ -24,7 +24,8 @@ reg [7:0] file_slot = 8'd0, file_data = 8'd0;
 reg [31:0] file_addr = 32'd0;
 
 wire conf_wr, lwe, hold_reset;
-wire [15:0] conf_ai, laddr;
+wire [15:0] conf_ai;
+wire [20:0] laddr;
 wire [7:0] conf_di, lwdata;
 wire [4:0] cart_blk;
 
@@ -48,7 +49,8 @@ wire [1:0] MWR_N, MRD_N;
 vic20_sram sram (
 	.clk(clk),
 	.caddr({ 5'd0, caddr }), .cdata(cdata), .cwe(cwe), .cwdata(cwdata),
-	.lwe(lwe), .laddr({ 5'd0, laddr }), .lwdata(lwdata),
+	.treq(1'b0), .taddr(21'd0), .tdata(), .tack(),
+	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
 	.MA(MA), .MD(MD), .MWR_N(MWR_N), .MRD_N(MRD_N)
 );
 

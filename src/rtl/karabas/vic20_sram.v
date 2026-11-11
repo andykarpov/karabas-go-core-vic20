@@ -19,6 +19,8 @@
    goes first; a write of the machine (cwe: held for the p2 half of its cycle) is repeated in
    every slot while cwe holds (the same byte at the same address; the address may change at the
    end of p2, a new address then gets its own data).
+ - a read for the tape player (treq held until tack): a read slot of its own between two of the
+   machine (the machine then waits one slot more: within ten clocks).
 */
 
 module vic20_sram (
@@ -28,6 +30,11 @@ module vic20_sram (
 	output wire [7:0] cdata,      // its byte, from the last read slot
 	input wire cwe,
 	input wire [7:0] cwdata,
+
+	input wire treq,              // a read of the tape player, held until tack
+	input wire [20:0] taddr,
+	output reg [7:0] tdata = 8'd0,
+	output reg tack = 1'b0,
 
 	input wire lwe,               // a byte of a loader (one clock)
 	input wire [20:0] laddr,
@@ -52,12 +59,14 @@ reg [15:0] md_out = 16'd0;
 reg [2:0] st = 3'd0;
 reg s_lane = 1'b0;
 reg [20:0] r_addr = 21'd0;
+reg r_tape = 1'b0, t_last = 1'b0;   // this read slot is the tape's; the last one was
 
 localparam S_IDLE = 3'd0, S_R1 = 3'd1, S_R2 = 3'd2, S_W1 = 3'd3, S_W2 = 3'd4, S_W3 = 3'd5;
 
 assign MD = md_oe ? md_out : 16'bz;
 
 always @(posedge clk) begin
+	tack <= 1'b0;
 	case (st)
 	S_IDLE:
 		if (lpend || cwe) begin
@@ -69,17 +78,32 @@ always @(posedge clk) begin
 			MRD_N <= 2'b11;
 			st <= S_W1;
 		end
+		else if (treq && !t_last && !tack) begin
+			MA <= { 1'b0, taddr[20:1] };
+			r_addr <= taddr;
+			r_tape <= 1'b1;
+			t_last <= 1'b1;
+			st <= S_R1;
+		end
 		else begin
 			MA <= { 1'b0, caddr[20:1] };
 			r_addr <= caddr;
+			r_tape <= 1'b0;
+			t_last <= 1'b0;
 			st <= S_R1;
 		end
 	S_R1:
 		st <= S_R2;
 	S_R2: begin
 		// two clocks after the address (an IOB register can take MD)
-		rword <= MD;
-		rlane <= r_addr[0];
+		if (r_tape) begin
+			tdata <= r_addr[0] ? MD[15:8] : MD[7:0];
+			tack <= 1'b1;
+		end
+		else begin
+			rword <= MD;
+			rlane <= r_addr[0];
+		end
 		st <= S_IDLE;
 	end
 	S_W1: begin
