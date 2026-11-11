@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "26111102",
+    "build": "26111103",
     "visible": true,
     "type": "osd",
     "order": 24,
@@ -57,7 +57,7 @@
             "slot": 4,
             "extensions": ".bin,.rom",
             "dir": "/vic20",
-            "hotkey": "Menu+K"
+            "hotkey": "Menu+F5"
         },
         {
             "type": "-"
@@ -88,6 +88,17 @@
             ],
             "default": 0,
             "hotkey": "Menu+V"
+        },
+        {
+            "index": 12,
+            "type": "S",
+            "name": "Keyboard",
+            "options": [
+                "Symbolic",
+                "Positional"
+            ],
+            "default": 0,
+            "hotkey": "Menu+K"
         },
         {
             "index": 8,

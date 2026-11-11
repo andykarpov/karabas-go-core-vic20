@@ -7,6 +7,8 @@
  'A' (04) = row 2 column 1; right shift (modifier bit 5) = row 4 column 6; cursor left (50) =
  the cursor key row 2 column 7 + left shift row 3 column 1; F11 = RESTORE; a keypad 5 = '5';
  no key = all high; joystick up + fire of JOY_R.
+ Symbolic: shift + = -> '+' (no shift), shift + 2 -> '@', ' -> shift + 7, shift + " -> shift + 2,
+ shift + A stays shift + A; positional: shift + = -> shift + '+'.
 */
 
 module tb_hid;
@@ -17,6 +19,7 @@ always #14 clk = !clk;
 reg [7:0] st = 8'd0, d0 = 8'd0, d1 = 8'd0;
 reg [12:0] jl = 13'd0, jr = 13'd0;
 reg [7:0] mo = 8'hFF;
+reg symbolic = 1'b0;
 wire [7:0] mi;
 wire restore_n, fire_n;
 wire [3:0] joy_n;
@@ -24,7 +27,7 @@ wire [3:0] joy_n;
 vic20_hid dut (
 	.clk(clk), .reset(1'b0),
 	.kb_status(st), .kb_dat0(d0), .kb_dat1(d1), .kb_dat2(8'd0), .kb_dat3(8'd0), .kb_dat4(8'd0), .kb_dat5(8'd0),
-	.joy_l(jl), .joy_r(jr),
+	.joy_l(jl), .joy_r(jr), .symbolic(symbolic),
 	.matrix_out(mo), .matrix_in(mi), .restore_n(restore_n), .joy_n(joy_n), .fire_n(fire_n)
 );
 
@@ -66,6 +69,16 @@ initial begin
 	if (restore_n !== 1'b0) begin $display("ERROR: F11 is not RESTORE"); errors = errors + 1; end
 	d0 = 8'h00;                 expect_keys(64'd0, "release");
 	if (restore_n !== 1'b1) begin $display("ERROR: RESTORE stays"); errors = errors + 1; end
+	// positional (symbolic = 0): left shift + = is shift + the '+' key
+	st = 8'h02; d0 = 8'h2E;     expect_keys((64'd1 << (3*8+1)) | (64'd1 << (0*8+5)), "positional shift + =");
+	symbolic = 1'b1;
+	expect_keys(64'd1 << (0*8+5), "symbolic shift + = -> +");
+	d0 = 8'h1F;                 expect_keys(64'd1 << (6*8+5), "symbolic shift + 2 -> @");
+	st = 8'h20; d0 = 8'h34;     expect_keys((64'd1 << (3*8+1)) | (64'd1 << (7*8+0)), "symbolic right shift + ' -> shift 2");
+	st = 8'h00;                 expect_keys((64'd1 << (3*8+1)) | (64'd1 << (0*8+3)), "symbolic ' -> shift 7");
+	st = 8'h02; d0 = 8'h04;     expect_keys((64'd1 << (3*8+1)) | (64'd1 << (2*8+1)), "symbolic shift + A");
+	st = 8'h00; d0 = 8'h2E;     expect_keys(64'd1 << (5*8+6), "symbolic = -> =");
+	d0 = 8'h00; symbolic = 1'b0;
 	jr = 13'b0000_0100_0010; #1;   // up + A
 	if (joy_n !== 4'b1110 || fire_n !== 1'b0) begin $display("ERROR: joystick %b %b", joy_n, fire_n); errors = errors + 1; end
 	$display("tb_hid: %0d errors", errors);
