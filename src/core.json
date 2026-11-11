@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "26111108",
+    "build": "26111110",
     "visible": true,
     "type": "osd",
     "order": 24,
@@ -66,6 +66,13 @@
             "extensions": ".rom,.bin",
             "dir": "/vic20",
             "hotkey": "Menu+F6"
+        },
+        {
+            "type": "F",
+            "name": "MC NVRAM",
+            "slot": 7,
+            "extensions": ".nvr",
+            "dir": "/vic20"
         },
         {
             "type": "FL",

@@ -28,8 +28,12 @@ It needs the firmware v26103113 or later. The OSD items look for files in `/vic2
   the BASIC pointers set after it: `RUN` or `LIST` at once.
 - **Cartridges:** a file with its two-byte load address (`.prg`, `.a0`, `.crt` as MiSTer takes
   them), 8 KB or more, in the blocks $2000 / $4000 / $6000 / $A000 (read only); a cartridge at
-  $A000 starts by itself. Eject cart (Menu+E) removes it.
-- **Mega-Cart:** a 2 MB Mega-Cart image (`.rom`, `.bin`) in the SRAM, with its menu.
+  $A000 starts by itself. A cartridge of several files (`-2000`, `-a000`, ...) is loaded file by
+  file; a file on a block that is already taken starts a new cartridge. Eject cart (Menu+E) removes
+  it.
+- **Mega-Cart:** a 2 MB Mega-Cart image (`.rom`, `.bin`) in the SRAM, with its menu. Its 8 KB NVRAM
+  (the saves of games) is kept in a file: the item MC NVRAM, a file of 8 KB (`sd/vic20/megacart.nvr`
+  of this repo, empty), written back a moment after the machine changes it.
 - **Disk drive 8:** a C1541 (6502, two VIAs, the DOS ROM 325302-01 / 901229-06AA) on `.d64` and
   `.g64` images, reads and writes (writes go to the image file); a read only file or Disk 8 WP is
   a write protected disk. Another DOS ROM (16 KB, or the last 16 KB of a 32 KB image) can be loaded
@@ -44,8 +48,8 @@ It needs the firmware v26103113 or later. The OSD items look for files in `/vic2
 
 Checked on the Mini G: BASIC, both keyboard layouts, PRG / cartridge / RAM expansions, PAL and
 NTSC, sound, D64 directory, `LOAD` and `SAVE` (the file lands in the image), TAP loading, Mega-Cart
-with Eject, a DOS ROM from a file, the paddles. Not there: a second drive, cartridges of several files, saving the Mega-Cart
-NVRAM, the RS-232 of the user port, tape recording.
+with Eject and its NVRAM kept over a restart of the core, a cartridge of two files, a DOS ROM from a
+file, the paddles. Not there: a second drive, the RS-232 of the user port, tape recording.
 
 ## OSD
 
@@ -59,6 +63,7 @@ The OSD opens with Menu+Esc ("Menu" is the Windows key).
 | Tape | a `.tap` file into the datasette | Menu+F4 |
 | Kernal | an 8 KB Kernal file instead of the built-in one | Menu+F5 |
 | Mega-Cart | a 2 MB Mega-Cart image | Menu+F6 |
+| MC NVRAM | the 8 KB file of the Mega-Cart NVRAM (`.nvr`) | |
 | 1541 DOS | a DOS ROM file of the drive | Menu+F7 |
 | RAM | None / 3K / 8K / 16K / 24K / 3K+24K / 35K (then Reset) | Menu+M |
 | Video | PAL / NTSC | Menu+V |

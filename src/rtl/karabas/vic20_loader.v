@@ -15,8 +15,10 @@
    Cartridge (SLOT_CART): bytes 0, 1 the load address, then the ROM image (8K or more, blocks
        $2000 / $4000 / $6000 / $A000). Each block it touches becomes a read-only RAM block
        (cart_blk -> ram_ext + ram_ext_ro). The machine is held in reset while it loads, so a
-       cartridge at $A000 starts by itself (its A0CBM signature). eject clears the blocks (and
-       resets).
+       cartridge at $A000 starts by itself (its A0CBM signature). A cartridge of several files
+       (e.g. -2000 and -a000) is loaded file by file: a file whose first block is free is added to
+       the blocks loaded before; a file whose first block is taken is a new cartridge, the old
+       blocks go. eject clears the blocks (and resets).
    Kernal (SLOT_KERNAL): 8K at $E000 of the Kernal RAM (conf $E000-$FFFF), the machine held in
        reset while it loads.
    Tape (SLOT_TAPE): the whole .tap file into the SRAM from TAPE_BASE (vic20_tape plays it).
@@ -27,7 +29,11 @@
 
  A new file is file_reset (IOCTL_SLOT, one clock, file_slot valid with it): the firmware sends
  IOCTL_STATE 1 (file_active) before IOCTL_SLOT, so at the rising edge of file_active file_slot is
- still the one of the previous file (26111106: a Mega-Cart after a PRG never set mc_loaded).
+ still the one of the previous file (26111106: a Mega-Cart after a PRG never set mc_loaded;
+ 26111109: a PRG after a cartridge reset the machine through hold_reset of the old slot, the
+ program was lost). file_on = file_active once the slot is known: after a rise of file_active
+ it waits for file_reset; a byte (file_wr) or SLOT_WAIT clocks without one end the wait too:
+ the same file goes on (file_active may drop inside a file). vic20_tape takes file_on too.
 
  Where a byte goes: conf_* (clk_sys) writes the block RAM of the machine (0000-03FF, 1000-1FFF,
  the colour RAM 9400-97FF, the Kernal E000-FFFF); the SRAM (lwe) has the expansions 0400-0FFF,
@@ -43,7 +49,8 @@ module vic20_loader #(
 	parameter [20:0] TAPE_MAX = 21'h0FFFFF,  // the last offset that fits (1 MB)
 	parameter [7:0] SLOT_MEGA = 8'd5,
 	parameter [21:0] MEGA_BASE = 22'h200000,
-	parameter [7:0] SLOT_DOS = 8'd6
+	parameter [7:0] SLOT_DOS = 8'd6,
+	parameter [15:0] SLOT_WAIT = 16'd35000    // ~1 ms
 ) (
 	input wire clk,
 	input wire reset,
@@ -55,6 +62,7 @@ module vic20_loader #(
 	input wire [7:0] file_data,
 	input wire file_wr,
 	input wire eject,
+	output wire file_on,                // file_active with a known file_slot
 
 	output reg conf_wr = 1'b0,
 	output reg [15:0] conf_ai = 16'd0,
@@ -79,13 +87,17 @@ wire is_kernal = file_slot == SLOT_KERNAL;
 wire is_tape = file_slot == SLOT_TAPE;
 wire is_mega = file_slot == SLOT_MEGA;
 wire is_dos = file_slot == SLOT_DOS;
-assign disk_hold = file_active && is_dos;
+reg wait_slot = 1'b0;
+reg [15:0] wait_cnt = 16'd0;
+reg raw_d = 1'b0;
+assign file_on = file_active && (file_wr || (raw_d && !wait_slot));   // not at the rise itself
+assign disk_hold = file_on && is_dos;
 
 reg [15:0] addr = 16'd0;            // the next address of a PRG / cartridge
 reg active_d = 1'b0;
 reg [3:0] ptr = 4'd0;               // the pointer writes after a PRG: 1..8
 
-assign hold_reset = file_active && (is_cart || is_kernal || is_mega);
+assign hold_reset = file_on && (is_cart || is_kernal || is_mega);
 
 // the expansion RAM / cartridge areas (SRAM)
 function in_sram;
@@ -112,16 +124,32 @@ always @(posedge clk) begin
 	conf_wr <= 1'b0;
 	lwe <= 1'b0;
 	dos_wr <= 1'b0;
-	active_d <= file_active;
+	active_d <= file_on;
+	raw_d <= file_active;
+	if (!file_active || file_reset || file_wr)
+		wait_slot <= 1'b0;
+	else if (!raw_d) begin
+		wait_slot <= 1'b1;
+		wait_cnt <= SLOT_WAIT;
+	end
+	else if (wait_slot) begin
+		if (wait_cnt == 16'd0)
+			wait_slot <= 1'b0;
+		wait_cnt <= wait_cnt - 16'd1;
+	end
 
 	if (reset) begin
 		ptr <= 4'd0;
 	end
-	else if (file_wr && file_active) begin
+	else if (file_wr && file_on) begin
 		if (file_addr == 32'd0)
 			addr[7:0] <= file_data;
-		else if (file_addr == 32'd1)
+		else if (file_addr == 32'd1) begin
 			addr[15:8] <= file_data;
+			// a cartridge part on a block that is taken: a new cartridge
+			if (is_cart && (cart_blk & blk_of({ file_data, addr[7:0] })) != 5'd0)
+				cart_blk <= 5'd0;
+		end
 		else if (is_kernal) begin
 			if (file_addr < 32'h2000) begin
 				conf_ai <= { 3'b111, file_addr[12:0] };
@@ -171,11 +199,10 @@ always @(posedge clk) begin
 		end
 	end
 
-	// a new cartridge: the blocks of the old one go, and the Mega-Cart; a Mega-Cart: the blocks go
-	if (file_reset && is_cart) begin
-		cart_blk <= 5'd0;
+	// a cartridge file: the Mega-Cart goes (its blocks: above, by the load address); a Mega-Cart:
+	// the blocks go
+	if (file_reset && is_cart)
 		mc_loaded <= 1'b0;
-	end
 	if (file_reset && is_mega) begin
 		cart_blk <= 5'd0;
 		mc_loaded <= 1'b1;
@@ -186,7 +213,7 @@ always @(posedge clk) begin
 	end
 
 	// the end of a PRG: the pointers (one write every other clock)
-	if (!file_active && active_d && is_prg)
+	if (!file_on && active_d && is_prg)
 		ptr <= 4'd1;
 	else if (ptr != 4'd0 && !conf_wr) begin
 		case (ptr)
