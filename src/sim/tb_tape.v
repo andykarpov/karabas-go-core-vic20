@@ -8,6 +8,9 @@
  deep, a reader takes one byte every 40 clocks) in the order of the file, no byte twice, none
  lost; tap_error (the FIFO empty) restarts the tape from byte 0. The machine keeps reading the
  SRAM meanwhile (its data unchanged).
+ The PLAY key of c1530 is a toggle (modelled: sense, reset to STOP by tap_restart): the file is
+ loaded with file_active dropping once in the middle (as a firmware may do), and the tape must
+ still end at PLAY.
 */
 
 module tb_tape;
@@ -15,7 +18,7 @@ module tb_tape;
 reg clk = 1'b0;
 always #14 clk = !clk;
 
-reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0;
+reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0, play_key = 1'b0;
 reg [7:0] file_slot = 8'd0, file_data = 8'd0;
 reg [31:0] file_addr = 32'd0;
 
@@ -44,11 +47,25 @@ wire tap_wrfull = fifo_n == 10'd512;
 vic20_tape tape (
 	.clk(clk), .reset(1'b0),
 	.file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
-	.file_wr(file_wr), .play(1'b0),
+	.file_wr(file_wr), .play(play_key),
 	.treq(treq), .taddr(taddr), .tdata(tdata), .tack(tack),
 	.tap_restart(tap_restart), .tap_version(tap_version), .tap_data(tap_data), .tap_wrreq(tap_wrreq),
-	.tap_wrfull(tap_wrfull), .tap_error(tap_error), .cass_run(1'b0), .tap_play_stop(tap_play_stop)
+	.tap_wrfull(tap_wrfull), .tap_error(tap_error), .cass_run(1'b0), .cass_sense(sense), .tap_play_stop(tap_play_stop)
 );
+defparam tape.AUTOPLAY = 23'd2000;
+
+// the PLAY / STOP key of c1530: a toggle on the rising edge, STOP while restarted
+reg sense = 1'b1, toggle_d = 1'b0;
+always @(posedge clk)
+	if (tap_restart) begin
+		sense <= 1'b1;
+		toggle_d <= 1'b0;
+	end
+	else begin
+		toggle_d <= tap_play_stop;
+		if (tap_play_stop && !toggle_d)
+			sense <= !sense;
+	end
 
 wire [7:0] cdata;
 wire [20:0] MA;
@@ -84,8 +101,11 @@ always @(posedge clk) begin
 		fifo_n <= 10'd0;
 	else begin
 		rd_div <= (rd_div == 9'd39) ? 9'd0 : rd_div + 9'd1;
-		fifo_n <= fifo_n + (tap_wrreq ? 10'd1 : 10'd0) - ((rd_div == 9'd0 && fifo_n != 10'd0) ? 10'd1 : 10'd0);
+		// c1530 takes bytes only while playing (PLAY pressed)
+		fifo_n <= fifo_n + (tap_wrreq ? 10'd1 : 10'd0) - ((rd_div == 9'd0 && fifo_n != 10'd0 && !sense) ? 10'd1 : 10'd0);
 	end
+	if (tap_restart)
+		got = 0;   // the bytes of an interrupted load: the FIFO is emptied
 	if (tap_wrreq) begin
 		if (tap_wrfull) begin $display("ERROR: a write into a full FIFO"); errors = errors + 1; end
 		if (tap_data !== tap_byte(got)) begin
@@ -94,7 +114,6 @@ always @(posedge clk) begin
 		end
 		got = got + 1;
 	end
-	if (tap_play_stop) plays = plays + 1;
 	if (cdata !== 8'h3C && $time > 1000) begin $display("ERROR: machine read %h", cdata); errors = errors + 1; end
 end
 
@@ -104,6 +123,12 @@ initial begin
 	file_active = 1'b1;
 	repeat (4) @(posedge clk);
 	for (i = 0; i < 1500; i = i + 1) begin
+		if (i == 700) begin   // the load drops for a while
+			@(negedge clk) file_active = 1'b0;
+			repeat (300) @(posedge clk);
+			@(negedge clk) file_active = 1'b1;
+			repeat (4) @(posedge clk);
+		end
 		file_addr = i;
 		file_data = tap_byte(i);
 		@(negedge clk) file_wr = 1'b1;
@@ -113,14 +138,25 @@ initial begin
 	@(negedge clk) file_active = 1'b0;
 	repeat (200000) @(posedge clk);
 	if (got !== 1500) begin $display("ERROR: %0d bytes played, want 1500", got); errors = errors + 1; end
-	if (plays !== 1) begin $display("ERROR: %0d PLAY pulses, want 1", plays); errors = errors + 1; end
+	if (sense !== 1'b0) begin $display("ERROR: the tape is at STOP after the load"); errors = errors + 1; end
 	if (tap_version !== 2'd2) begin $display("ERROR: version %0d", tap_version); errors = errors + 1; end
-	// the end: c1530 reports its FIFO empty -> from the start again
-	got = 0;
+	// the end: c1530 reports its FIFO empty -> from the start again, the key released (STOP)
 	@(negedge clk) tap_error = 1'b1;
 	@(negedge clk) tap_error = 1'b0;
+	repeat (20000) @(posedge clk);
+	if (got !== 512) begin $display("ERROR: after the end %0d bytes (a full FIFO), want 512", got); errors = errors + 1; end
+	if (sense !== 1'b1) begin $display("ERROR: PLAY after the end of the tape"); errors = errors + 1; end
+	// Tape play: PLAY again, the rest of the tape follows
+	@(negedge clk) play_key = 1'b1;
+	@(negedge clk) play_key = 1'b0;
 	repeat (200000) @(posedge clk);
-	if (got !== 1500) begin $display("ERROR: after the restart %0d bytes, want 1500", got); errors = errors + 1; end
+	if (got !== 1500 || sense !== 1'b0) begin $display("ERROR: after Tape play %0d bytes, sense %b", got, sense); errors = errors + 1; end
+	// a restart of c1530 (a reset of the machine) while the key is down: PLAY again
+	@(negedge clk) force tape.restart = 1'b1;
+	repeat (4) @(posedge clk);
+	@(negedge clk) release tape.restart;
+	repeat (10000) @(posedge clk);
+	if (sense !== 1'b0) begin $display("ERROR: STOP after a restart with the key down"); errors = errors + 1; end
 	$display("tb_tape: %0d errors", errors);
 	$finish;
 end

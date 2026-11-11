@@ -438,6 +438,7 @@ vic20_tape tape (
 	.tap_wrfull(tap_wrfull),
 	.tap_error(tap_error),
 	.cass_run(cass_run),
+	.cass_sense(cass_sense),
 	.tap_play_stop(tap_play_stop)
 );
 
