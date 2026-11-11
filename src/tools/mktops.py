@@ -52,8 +52,6 @@ assign ESP_BOOT_N = 1'bz;
 assign MIDI_RESET_N = 1'b1;
 assign MIDI_CLK = 1'b0;
 """, 'esp')
-    s = sub(s, "assign MIDI_TX = 1'b1;\nassign ADC_CLK = 1'b0;\nassign ADC_BCK = 1'bz;\nassign ADC_LRCK = 1'bz;\n",
-            "assign MIDI_TX = 1'b1;\n", 'adc')
     return s
 
 
@@ -73,6 +71,9 @@ kg_sigma_delta_dac dac_r (.clk(clk_sys), .reset(areset), .din({ ~aud[15], aud[14
 
 def go(s):
     s = common(s, 'go')
+    # no audio ADC on Go (Mini keeps the pins as Mini G)
+    s = sub(s, "assign MIDI_TX = 1'b1;\nassign ADC_CLK = 1'b0;\nassign ADC_BCK = 1'bz;\nassign ADC_LRCK = 1'bz;\n",
+            "assign MIDI_TX = 1'b1;\n", 'adc')
     s = sub(s, " Commodore VIC-20 core for Karabas Mini rev.G (HDMI, PCM5102): the machine of VIC20Nano",
             " Commodore VIC-20 core for Karabas Go (VGA, PCM5102), made from karabas_minig_top.v by\n"
             " tools/mktops.py (edit that one): the machine of VIC20Nano", 'title')
@@ -125,5 +126,8 @@ assign VGA_VS = ~vid_vs;
 
 for board, f in (('mini', mini), ('go', go)):
     out = f(src)
-    open(os.path.join(rtl, 'karabas_%s_top.v' % board), 'w').write(out)
-    print('rtl/karabas_%s_top.v' % board)
+    path = os.path.join(rtl, 'karabas_%s_top.v' % board)
+    # an unchanged top keeps its time stamp: make does not synthesise that board again
+    if not os.path.exists(path) or open(path).read() != out:
+        open(path, 'w').write(out)
+        print('rtl/karabas_%s_top.v' % board)
