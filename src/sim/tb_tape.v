@@ -18,24 +18,25 @@ module tb_tape;
 reg clk = 1'b0;
 always #14 clk = !clk;
 
-reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0, play_key = 1'b0;
+reg file_active = 1'b0, file_wr = 1'b0, tap_error = 1'b0, play_key = 1'b0, file_reset = 1'b0;
 reg [7:0] file_slot = 8'd0, file_data = 8'd0;
 reg [31:0] file_addr = 32'd0;
 
 wire conf_wr, lwe, hold_reset;
 wire [15:0] conf_ai;
-wire [20:0] laddr, taddr;
+wire [21:0] laddr, taddr;
 wire [7:0] conf_di, lwdata, tdata;
 wire [4:0] cart_blk;
 wire treq, tack;
 
 vic20_loader loader (
 	.clk(clk), .reset(1'b0),
-	.file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
+	.file_reset(file_reset), .file_active(file_active), .file_slot(file_slot), .file_addr(file_addr), .file_data(file_data),
 	.file_wr(file_wr), .eject(1'b0),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
-	.cart_blk(cart_blk), .hold_reset(hold_reset)
+	.cart_blk(cart_blk), .hold_reset(hold_reset),
+	.mc_loaded(), .dos_wr(), .dos_addr(), .dos_data(), .disk_hold()
 );
 
 wire tap_restart, tap_wrreq, tap_play_stop;
@@ -73,7 +74,7 @@ wire [15:0] MD;
 wire [1:0] MWR_N, MRD_N;
 vic20_sram sram (
 	.clk(clk),
-	.caddr(21'h001234), .cdata(cdata), .cwe(1'b0), .cwdata(8'd0),
+	.caddr(22'h001234), .cdata(cdata), .cwe(1'b0), .cwdata(8'd0),
 	.treq(treq), .taddr(taddr), .tdata(tdata), .tack(tack),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
 	.MA(MA), .MD(MD), .MWR_N(MWR_N), .MRD_N(MRD_N)
@@ -119,8 +120,12 @@ end
 
 initial begin
 	repeat (10) @(posedge clk);
-	file_slot = 8'd3;
-	file_active = 1'b1;
+	// as the firmware: IOCTL_STATE 1 with the slot of the previous file, then IOCTL_SLOT
+	file_slot = 8'd1;
+	@(negedge clk) file_active = 1'b1;
+	repeat (4) @(posedge clk);
+	@(negedge clk) begin file_slot = 8'd3; file_reset = 1'b1; end
+	@(negedge clk) file_reset = 1'b0;
 	repeat (4) @(posedge clk);
 	for (i = 0; i < 1500; i = i + 1) begin
 		if (i == 700) begin   // the load drops for a while

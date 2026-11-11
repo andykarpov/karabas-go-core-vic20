@@ -7,8 +7,9 @@
  The SRAM of the board (two 2M x 8 chips = 2M x 16, 10 ns, asynchronous) as the external memory
  of the VIC-20 (extmem of vic20.vhd: the RAM expansions $0400-$0FFF, $2000-$7FFF, the cartridge
  RAM $A000-$BFFF, later the Mega-Cart) and for the loaders of the mcu, which write bytes.
- Byte address = { MA, lane }, lane 0 = MD[7:0] (MWR_N[0], MRD_N[0]); the addresses here are 21
- bits (the first 2 MB of the 4 MB, MA[20] = 0); the VIC space is the first 64K.
+ Byte address = { MA, lane }, lane 0 = MD[7:0] (MWR_N[0], MRD_N[0]): 22 bits, the 4 MB. The map
+ (karabas_*_top): 000000 the VIC space (expansions, cartridge RAM), 0F0000 the NVRAM of the
+ Mega-Cart, 100000 the tape, 200000 the Mega-Cart ROM (2 MB).
 
  Slots of three clocks (28 ns at 35.8 MHz, 84 ns per slot):
  - read: MA = the address of the machine, MD taken two clocks later; one after the other, so
@@ -26,21 +27,21 @@
 module vic20_sram (
 	input wire clk,
 
-	input wire [20:0] caddr,      // byte address of the machine
+	input wire [21:0] caddr,      // byte address of the machine
 	output wire [7:0] cdata,      // its byte, from the last read slot
 	input wire cwe,
 	input wire [7:0] cwdata,
 
 	input wire treq,              // a read of the tape player, held until tack
-	input wire [20:0] taddr,
+	input wire [21:0] taddr,
 	output reg [7:0] tdata = 8'd0,
 	output reg tack = 1'b0,
 
 	input wire lwe,               // a byte of a loader (one clock)
-	input wire [20:0] laddr,
+	input wire [21:0] laddr,
 	input wire [7:0] lwdata,
 
-	output reg [20:0] MA = 21'd0, // word address; [20] = 0
+	output reg [20:0] MA = 21'd0, // word address
 	inout wire [15:0] MD,
 	output reg [1:0] MWR_N = 2'b11,
 	output reg [1:0] MRD_N = 2'b00
@@ -51,14 +52,14 @@ reg rlane = 1'b0;
 assign cdata = rlane ? rword[15:8] : rword[7:0];
 
 reg lpend = 1'b0;
-reg [20:0] lp_addr = 21'd0;
+reg [21:0] lp_addr = 22'd0;
 reg [7:0] lp_data = 8'd0;
 
 reg md_oe = 1'b0;
 reg [15:0] md_out = 16'd0;
 reg [2:0] st = 3'd0;
 reg s_lane = 1'b0;
-reg [20:0] r_addr = 21'd0;
+reg [21:0] r_addr = 22'd0;
 reg r_tape = 1'b0, t_last = 1'b0;   // this read slot is the tape's; the last one was
 
 localparam S_IDLE = 3'd0, S_R1 = 3'd1, S_R2 = 3'd2, S_W1 = 3'd3, S_W2 = 3'd4, S_W3 = 3'd5;
@@ -70,7 +71,7 @@ always @(posedge clk) begin
 	case (st)
 	S_IDLE:
 		if (lpend || cwe) begin
-			MA <= { 1'b0, lpend ? lp_addr[20:1] : caddr[20:1] };
+			MA <= lpend ? lp_addr[21:1] : caddr[21:1];
 			s_lane <= lpend ? lp_addr[0] : caddr[0];
 			md_out <= lpend ? { lp_data, lp_data } : { cwdata, cwdata };
 			lpend <= 1'b0;
@@ -79,14 +80,14 @@ always @(posedge clk) begin
 			st <= S_W1;
 		end
 		else if (treq && !t_last && !tack) begin
-			MA <= { 1'b0, taddr[20:1] };
+			MA <= taddr[21:1];
 			r_addr <= taddr;
 			r_tape <= 1'b1;
 			t_last <= 1'b1;
 			st <= S_R1;
 		end
 		else begin
-			MA <= { 1'b0, caddr[20:1] };
+			MA <= caddr[21:1];
 			r_addr <= caddr;
 			r_tape <= 1'b0;
 			t_last <= 1'b0;

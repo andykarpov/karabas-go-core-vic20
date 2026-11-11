@@ -18,12 +18,17 @@
  1040 x 522 at 32.727 MHz (31.5 kHz, 60.3 Hz); de: 912 x 576 / 816 x 480 (see the video part).
 
  Files (FL items, vic20_loader): PRG (slot 1, injected), Cartridge (slot 2), Kernal (slot 4),
- Tape (slot 3: the .tap file in the SRAM from 1 MB, vic20_tape plays it into the C1530).
+ Tape (slot 3: the .tap file in the SRAM from 1 MB, vic20_tape plays it into the C1530),
+ Mega-Cart (slot 5: the 2 MB ROM in the SRAM from 2 MB, megacart.v of upstream maps it; its NVRAM
+ in the SRAM at 0F0000, not saved, as upstream), 1541 DOS (slot 6: a DOS ROM file for the drive).
+ SRAM map (bytes): 000000 the VIC space, 0F0000 NVRAM, 100000 tape, 200000 Mega-Cart ROM.
+ Mouse: Paddles = the two paddles of the VIC (x / y), the buttons their fire (joy left / right).
  Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through img_sdc.
 
  Soft switches (the index of the item in the osd of core.json, the "index" of the items):
    6 RAM (None / 3K / 8K / 16K / 24K / 3K+24K / 35K)   7 Video (PAL / NTSC)   8 Disk 8 WP
    9 Tape play   10 Eject cart   11 Reset   12 Keyboard (Symbolic / Positional)
+   13 Mouse (Off / Paddles)
 */
 
 module karabas_minig_top (
@@ -193,7 +198,7 @@ wire ms_upd;
 wire rom_active, rom_wr;
 wire [31:0] rom_addr;
 wire [7:0] rom_data;
-wire file_active, file_wr;
+wire file_reset, file_active, file_wr;
 wire [7:0] file_slot, file_data;
 wire [31:0] file_addr;
 wire [15:0] softsw_command, osd_command;
@@ -258,6 +263,7 @@ kg_mcu #(
 	.ROMLOAD_DATA(rom_data),
 	.ROMLOAD_WR(rom_wr),
 
+	.FILELOAD_RESET(file_reset),
 	.FILELOAD_ACTIVE(file_active),
 	.FILELOAD_ADDR(file_addr),
 	.FILELOAD_DATA(file_data),
@@ -332,8 +338,8 @@ assign SD_CLK = mcu_sck_ibufg;
 
 // ------------------------------------------------------------------ soft switches
 
-wire [13*8-1:0] sw;
-kg_soft_switches #(.N(13)) soft_switches (
+wire [14*8-1:0] sw;
+kg_soft_switches #(.N(14)) soft_switches (
 	.clk(clk_sys),
 	.command(softsw_command),
 	.regs(sw),
@@ -346,6 +352,7 @@ wire sw_tape_play = sw[9*8];
 wire sw_eject = sw[10*8];
 wire sw_reset = sw[11*8];
 wire sw_positional = sw[12*8];   // Keyboard: 0 Symbolic, 1 Positional
+wire sw_paddles = sw[13*8];      // Mouse: 0 Off, 1 Paddles
 
 // RAM expansion of the switch, in ram_ext order ($A000, $6000, $4000, $2000, $0400)
 reg [4:0] ram_sw;
@@ -381,19 +388,24 @@ always @(posedge clk_sys) begin
 	eject_d <= sw_eject;
 	eject_rst <= sw_eject && !eject_d;
 end
-wire vic_reset = areset || sw_reset || mcu_busy || std_rst != 8'd0 || load_reset || eject_rst;
+wire mc_soft_reset;
+wire vic_reset = areset || sw_reset || mcu_busy || std_rst != 8'd0 || load_reset || eject_rst || mc_soft_reset;
 
 // ------------------------------------------------------------------ loaders
 
 wire conf_wr, lwe;
 wire [15:0] conf_ai;
-wire [20:0] laddr;
+wire [21:0] laddr;
 wire [7:0] conf_di, lwdata;
 wire [4:0] cart_blk;
+wire mc_loaded, dos_wr, disk_hold;
+wire [13:0] dos_addr;
+wire [7:0] dos_data;
 
 vic20_loader loader (
 	.clk(clk_sys),
 	.reset(areset),
+	.file_reset(file_reset),
 	.file_active(file_active),
 	.file_slot(file_slot),
 	.file_addr(file_addr),
@@ -407,13 +419,18 @@ vic20_loader loader (
 	.laddr(laddr),
 	.lwdata(lwdata),
 	.cart_blk(cart_blk),
-	.hold_reset(load_reset)
+	.hold_reset(load_reset),
+	.mc_loaded(mc_loaded),
+	.dos_wr(dos_wr),
+	.dos_addr(dos_addr),
+	.dos_data(dos_data),
+	.disk_hold(disk_hold)
 );
 
 // ------------------------------------------------------------------ tape
 
 wire treq, tack;
-wire [20:0] taddr;
+wire [21:0] taddr;
 wire [7:0] tdata, tap_data;
 wire tap_restart, tap_wrreq, tap_wrfull, tap_error, tap_play_stop, cass_run, cass_motor, cass_sense, cass_read;
 wire [1:0] tap_version;
@@ -503,7 +520,7 @@ always @(posedge clk_sys) begin
 		disk_g64 <= sdc_img_size >= 64'd333744;
 	end
 end
-wire disk_reset = vic_reset || (disk_g64 != disk_g64_d);
+wire disk_reset = vic_reset || (disk_g64 != disk_g64_d) || disk_hold;
 
 // ------------------------------------------------------------------ the machine
 
@@ -516,8 +533,13 @@ wire [3:0] joy_n;
 wire extmem_sel, extmem_r_wn;
 wire [15:0] extmem_addr;
 wire [7:0] extmem_din, extmem_dout;
-wire [4:0] ram_ext = ram_sw | cart_blk;
-wire [4:0] ram_ext_ro = cart_blk;
+// a Mega-Cart maps all of the expansion space itself (upstream: ram_ext 11111, no ro blocks)
+wire [4:0] ram_ext = mc_loaded ? 5'b11111 : (ram_sw | cart_blk);
+wire [4:0] ram_ext_ro = mc_loaded ? 5'b00000 : cart_blk;
+wire io2_sel, io3_sel, blk123_sel, blk5_sel, ram123_sel;
+wire [3:0] pad_joy_n;
+wire pad_fire_n;
+wire [7:0] potx, poty;
 
 vic20_core machine (
 	.clk_sys(clk_sys),
@@ -540,10 +562,10 @@ vic20_core machine (
 	.kbd_matrix_in(kbd_matrix_in),
 	.restore_n(restore_n),
 
-	.joy_n(joy_n),
-	.fire_n(fire_n),
-	.potx(8'hFF),
-	.poty(8'hFF),
+	.joy_n(joy_n & pad_joy_n),
+	.fire_n(fire_n & pad_fire_n),
+	.potx(potx),
+	.poty(poty),
 
 	.ram_ext_ro(ram_ext_ro),
 	.ram_ext(ram_ext),
@@ -552,11 +574,11 @@ vic20_core machine (
 	.extmem_addr(extmem_addr),
 	.extmem_din(extmem_din),
 	.extmem_dout(extmem_dout),
-	.io2_sel(),
-	.io3_sel(),
-	.blk123_sel(),
-	.blk5_sel(),
-	.ram123_sel(),
+	.io2_sel(io2_sel),
+	.io3_sel(io3_sel),
+	.blk123_sel(blk123_sel),
+	.blk5_sel(blk5_sel),
+	.ram123_sel(ram123_sel),
 	.p2h(),
 
 	.conf_wr(conf_wr),
@@ -571,6 +593,9 @@ vic20_core machine (
 	.disk_readonly(sw_disk_wp || img_wp[0]),
 	.disk_g64(disk_g64),
 	.disk_led(),
+	.dos_wr(dos_wr),
+	.dos_addr(dos_addr),
+	.dos_data(dos_data),
 	.sd_lba(disk_lba),
 	.sd_rd(disk_rd),
 	.sd_wr(disk_wr),
@@ -609,11 +634,39 @@ wire ext_ro = (eblk == 3'd0) ? ram_ext_ro[0] :
               (eblk == 3'd3) ? ram_ext_ro[3] :
               (eblk == 3'd5) ? ram_ext_ro[4] : 1'b0;
 
+// ------------------------------------------------------------------ Mega-Cart
+
+// megacart.v of upstream between the machine and the SRAM: mc_addr = ROM bank (low / high half)
+// or its RAM (mc_addr[22]: the VIC space), mc_nvram_sel its NVRAM ($0400-$0FFF, $9800-$9FFF)
+wire [22:0] mc_addr;
+wire mc_wr_n, mc_nvram_sel;
+megacart mega (
+	.clk(clk_sys),
+	.reset_n(mc_loaded && !(areset || sw_reset || load_reset || eject_rst)),
+	.vic_addr(extmem_addr),
+	.vic_wr_n(extmem_r_wn),
+	.vic_io2_sel(io2_sel),
+	.vic_io3_sel(io3_sel),
+	.vic_blk123_sel(blk123_sel),
+	.vic_blk5_sel(blk5_sel),
+	.vic_ram123_sel(ram123_sel),
+	.vic_data(extmem_dout),
+	.mc_addr(mc_addr),
+	.mc_wr_n(mc_wr_n),
+	.mc_nvram_sel(mc_nvram_sel),
+	.mc_soft_reset(mc_soft_reset)
+);
+wire [21:0] mc_sram_addr = mc_nvram_sel ? { 9'h00F, extmem_addr[12:0] } :   // 0F0000 NVRAM
+                           mc_addr[22] ? { 6'd0, mc_addr[15:0] } :          // its RAM
+                           { 1'b1, mc_addr[20:0] };                         // 200000 ROM
+wire [21:0] ext_sram_addr = mc_loaded ? mc_sram_addr : { 6'd0, extmem_addr };
+wire ext_we = mc_loaded ? (extmem_sel && !mc_wr_n) : (extmem_sel && !extmem_r_wn && !ext_ro);
+
 vic20_sram sram (
 	.clk(clk_sys),
-	.caddr({ 5'd0, extmem_addr }),
+	.caddr(ext_sram_addr),
 	.cdata(extmem_din),
-	.cwe(extmem_sel && !extmem_r_wn && !ext_ro),
+	.cwe(ext_we),
 	.cwdata(extmem_dout),
 	.treq(treq),
 	.taddr(taddr),
@@ -647,6 +700,28 @@ vic20_hid hid (
 	.joy_n(joy_n),
 	.fire_n(fire_n)
 );
+
+// ------------------------------------------------------------------ paddles (mouse)
+
+// Mouse = Paddles: x / y of the mouse move the two paddles (0..255, POTX / POTY of the 6561), the
+// left / right button is the fire of paddle x / y (joystick left / right lines, as on the VIC);
+// Off: the pots at 255 (no paddles), the buttons not used
+reg [7:0] pad_x = 8'd128, pad_y = 8'd128;
+reg ms_upd_d = 1'b0;
+wire [8:0] pad_x_n = { 1'b0, pad_x } + { ms_x[7], ms_x };
+wire [8:0] pad_y_n = { 1'b0, pad_y } - { ms_y[7], ms_y };
+always @(posedge clk_sys) begin
+	ms_upd_d <= ms_upd;
+	if (ms_upd != ms_upd_d) begin
+		// clamp: an overflow of the 9-bit sum is the sign of the delta
+		pad_x <= pad_x_n[8] ? (ms_x[7] ? 8'd0 : 8'd255) : pad_x_n[7:0];
+		pad_y <= pad_y_n[8] ? (ms_y[7] ? 8'd255 : 8'd0) : pad_y_n[7:0];
+	end
+end
+assign potx = sw_paddles ? pad_x : 8'hFF;
+assign poty = sw_paddles ? pad_y : 8'hFF;
+assign pad_joy_n = sw_paddles ? { !ms_b[1], !ms_b[0], 2'b11 } : 4'b1111;   // right, left
+assign pad_fire_n = 1'b1;
 
 // ------------------------------------------------------------------ video
 

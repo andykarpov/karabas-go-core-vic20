@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "26111105",
+    "build": "26111107",
     "visible": true,
     "type": "osd",
     "order": 24,
@@ -60,6 +60,22 @@
             "hotkey": "Menu+F5"
         },
         {
+            "type": "FL",
+            "name": "Mega-Cart",
+            "slot": 5,
+            "extensions": ".rom,.bin",
+            "dir": "/vic20",
+            "hotkey": "Menu+F6"
+        },
+        {
+            "type": "FL",
+            "name": "1541 DOS",
+            "slot": 6,
+            "extensions": ".bin,.rom",
+            "dir": "/vic20",
+            "hotkey": "Menu+F7"
+        },
+        {
             "type": "-"
         },
         {
@@ -99,6 +115,16 @@
             ],
             "default": 0,
             "hotkey": "Menu+K"
+        },
+        {
+            "index": 13,
+            "type": "S",
+            "name": "Mouse",
+            "options": [
+                "Off",
+                "Paddles"
+            ],
+            "default": 0
         },
         {
             "index": 8,

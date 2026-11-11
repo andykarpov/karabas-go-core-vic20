@@ -20,6 +20,14 @@
    Kernal (SLOT_KERNAL): 8K at $E000 of the Kernal RAM (conf $E000-$FFFF), the machine held in
        reset while it loads.
    Tape (SLOT_TAPE): the whole .tap file into the SRAM from TAPE_BASE (vic20_tape plays it).
+   Mega-Cart (SLOT_MEGA): the 2 MB ROM image into the SRAM from MEGA_BASE; mc_loaded from its
+       start until a cartridge or eject; the machine held in reset while it loads.
+   1541 DOS (SLOT_DOS): a 16K DOS ROM of the C1541 (e.g. JiffyDOS; a 32K image: its last 16K)
+       on dos_*; the drive held in reset while it loads (disk_hold).
+
+ A new file is file_reset (IOCTL_SLOT, one clock, file_slot valid with it): the firmware sends
+ IOCTL_STATE 1 (file_active) before IOCTL_SLOT, so at the rising edge of file_active file_slot is
+ still the one of the previous file (26111106: a Mega-Cart after a PRG never set mc_loaded).
 
  Where a byte goes: conf_* (clk_sys) writes the block RAM of the machine (0000-03FF, 1000-1FFF,
  the colour RAM 9400-97FF, the Kernal E000-FFFF); the SRAM (lwe) has the expansions 0400-0FFF,
@@ -32,11 +40,15 @@ module vic20_loader #(
 	parameter [7:0] SLOT_KERNAL = 8'd4,
 	parameter [7:0] SLOT_TAPE = 8'd3,
 	parameter [20:0] TAPE_BASE = 21'h100000,
-	parameter [20:0] TAPE_MAX = 21'h0FFFFF   // the last offset that fits (1 MB)
+	parameter [20:0] TAPE_MAX = 21'h0FFFFF,  // the last offset that fits (1 MB)
+	parameter [7:0] SLOT_MEGA = 8'd5,
+	parameter [21:0] MEGA_BASE = 22'h200000,
+	parameter [7:0] SLOT_DOS = 8'd6
 ) (
 	input wire clk,
 	input wire reset,
 
+	input wire file_reset,
 	input wire file_active,
 	input wire [7:0] file_slot,
 	input wire [31:0] file_addr,
@@ -49,23 +61,31 @@ module vic20_loader #(
 	output reg [7:0] conf_di = 8'd0,
 
 	output reg lwe = 1'b0,
-	output reg [20:0] laddr = 21'd0,
+	output reg [21:0] laddr = 22'd0,
 	output reg [7:0] lwdata = 8'd0,
 
 	output reg [4:0] cart_blk = 5'd0,   // $A000, $6000, $4000, $2000, $0400 (ram_ext order)
-	output wire hold_reset              // a cartridge or a Kernal loading
+	output wire hold_reset,             // a cartridge, a Kernal or a Mega-Cart loading
+	output reg mc_loaded = 1'b0,        // a Mega-Cart is in
+	output reg dos_wr = 1'b0,
+	output reg [13:0] dos_addr = 14'd0,
+	output reg [7:0] dos_data = 8'd0,
+	output wire disk_hold               // a DOS loading
 );
 
 wire is_prg = file_slot == SLOT_PRG;
 wire is_cart = file_slot == SLOT_CART;
 wire is_kernal = file_slot == SLOT_KERNAL;
 wire is_tape = file_slot == SLOT_TAPE;
+wire is_mega = file_slot == SLOT_MEGA;
+wire is_dos = file_slot == SLOT_DOS;
+assign disk_hold = file_active && is_dos;
 
 reg [15:0] addr = 16'd0;            // the next address of a PRG / cartridge
 reg active_d = 1'b0;
 reg [3:0] ptr = 4'd0;               // the pointer writes after a PRG: 1..8
 
-assign hold_reset = file_active && (is_cart || is_kernal);
+assign hold_reset = file_active && (is_cart || is_kernal || is_mega);
 
 // the expansion RAM / cartridge areas (SRAM)
 function in_sram;
@@ -91,6 +111,7 @@ endfunction
 always @(posedge clk) begin
 	conf_wr <= 1'b0;
 	lwe <= 1'b0;
+	dos_wr <= 1'b0;
 	active_d <= file_active;
 
 	if (reset) begin
@@ -111,7 +132,7 @@ always @(posedge clk) begin
 		if ((is_prg || is_cart) && file_addr >= 32'd2) begin
 			if (is_prg ? addr < 16'hA000 : addr < 16'hC000) begin
 				if (in_sram(addr)) begin
-					laddr <= { 5'd0, addr };
+					laddr <= { 6'd0, addr };
 					lwdata <= file_data;
 					lwe <= 1'b1;
 				end
@@ -125,8 +146,20 @@ always @(posedge clk) begin
 				addr <= addr + 16'd1;
 			end
 		end
+		if (is_mega && file_addr < 32'h200000) begin
+			laddr <= MEGA_BASE + { 1'b0, file_addr[20:0] };
+			lwdata <= file_data;
+			lwe <= 1'b1;
+		end
+		// a DOS of 16K, or a 32K image: its second half overwrites the first, the last 16K stay
+		// (the ROMs at $C000-$FFFF of the drive)
+		if (is_dos && file_addr < 32'h8000) begin
+			dos_addr <= file_addr[13:0];
+			dos_data <= file_data;
+			dos_wr <= 1'b1;
+		end
 		if (is_tape && file_addr <= TAPE_MAX) begin
-			laddr <= TAPE_BASE + file_addr[20:0];
+			laddr <= { 1'b0, TAPE_BASE + file_addr[20:0] };
 			lwdata <= file_data;
 			lwe <= 1'b1;
 		end
@@ -138,11 +171,19 @@ always @(posedge clk) begin
 		end
 	end
 
-	// a new cartridge: the blocks of the old one go
-	if (file_active && !active_d && is_cart)
+	// a new cartridge: the blocks of the old one go, and the Mega-Cart; a Mega-Cart: the blocks go
+	if (file_reset && is_cart) begin
 		cart_blk <= 5'd0;
-	if (eject)
+		mc_loaded <= 1'b0;
+	end
+	if (file_reset && is_mega) begin
 		cart_blk <= 5'd0;
+		mc_loaded <= 1'b1;
+	end
+	if (eject) begin
+		cart_blk <= 5'd0;
+		mc_loaded <= 1'b0;
+	end
 
 	// the end of a PRG: the pointers (one write every other clock)
 	if (!file_active && active_d && is_prg)

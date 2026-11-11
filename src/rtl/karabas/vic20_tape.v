@@ -40,7 +40,7 @@ module vic20_tape #(
 	input wire play,             // the OSD trigger (a level while held)
 
 	output reg treq = 1'b0,
-	output wire [20:0] taddr,
+	output wire [21:0] taddr,
 	input wire [7:0] tdata,
 	input wire tack,
 
@@ -64,7 +64,7 @@ reg [20:0] pos = 21'd0;      // the next byte to give c1530
 reg [20:0] size = 21'd0;     // the bytes of the file that is loading
 reg wait_full = 1'b0;        // a byte was written: the FIFO full flag follows a clock later
 
-assign taddr = TAPE_BASE + pos;
+assign taddr = { 1'b0, TAPE_BASE + pos };
 
 wire near_end = cass_run && (last - pos) < 21'd80;
 wire restart = reset || loading || tap_error || near_end;
