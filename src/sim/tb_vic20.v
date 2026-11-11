@@ -149,6 +149,7 @@ module tb_vic20 (
 		.tap_data(8'd0),
 		.tap_wrreq(1'b0),
 		.tap_wrfull(),
+		.tap_error(),
 		.tap_play_stop(1'b0),
 		.cass_motor(),
 		.cass_sense(),

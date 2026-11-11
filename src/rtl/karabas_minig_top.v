@@ -17,8 +17,9 @@
  scandoubler of VIC20Nano: 1136 x 624 at 35.465 MHz (31.2 kHz, 50.0 Hz, the 576p50 lines) or
  1040 x 522 at 32.727 MHz (31.5 kHz, 60.3 Hz); de: 912 x 576 / 816 x 480 (see the video part).
 
- Files (FL items, vic20_loader): PRG (slot 1, injected), Cartridge (slot 2), Kernal (slot 4).
- Disk 8 (F 0, C1541 on img_sdc) and Tape (FL 3, C1530) come in Ф3.
+ Files (FL items, vic20_loader): PRG (slot 1, injected), Cartridge (slot 2), Kernal (slot 4),
+ Tape (slot 3: the .tap file in the SRAM from 1 MB, vic20_tape plays it into the C1530).
+ Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through img_sdc.
 
  Soft switches (the index of the item in the osd of core.json, the "index" of the items):
    6 RAM (None / 3K / 8K / 16K / 24K / 3K+24K / 35K)   7 Video (PAL / NTSC)   8 Disk 8 WP
@@ -214,7 +215,8 @@ kg_mcu #(
 	.ENABLE_UART(0),
 	.ENABLE_MATRIX(0),
 	.ENABLE_DEBUG(0),
-	.ENABLE_IMG(0),      // Ф3: Disk 8
+	.ENABLE_IMG(1),      // Disk 8 (slot 0)
+	.ENABLE_IMG_WP(1),   // a read only image: the disk is write protected
 	.ENABLE_FILE(1),
 	.FILE_CMDS(0),       // the ioctl commands of the FL items
 	.FILE_WR_EACH(1),
@@ -312,8 +314,8 @@ kg_mcu #(
 	.IMG_RESULT_WR(img_result_wr),
 	.IMG_RESULT(img_result),
 	.IMG_SUM(img_sum),
-	.IMG_Q_WR(1'b0),
-	.IMG_Q_DI(24'd0),
+	.IMG_Q_WR(img_q_wr),
+	.IMG_Q_DI(img_q_di),
 	.IMG_Q_ACK(img_q_ack),
 	.ESP_UART_RX_DATA(8'h00),
 	.ESP_UART_RX_WR(1'b0),
@@ -339,6 +341,8 @@ kg_soft_switches #(.N(13)) soft_switches (
 );
 wire [2:0] sw_ram = sw[6*8 +: 3];
 assign sw_ntsc = sw[7*8];
+wire sw_disk_wp = sw[8*8];
+wire sw_tape_play = sw[9*8];
 wire sw_eject = sw[10*8];
 wire sw_reset = sw[11*8];
 wire sw_positional = sw[12*8];   // Keyboard: 0 Symbolic, 1 Positional
@@ -382,7 +386,8 @@ wire vic_reset = areset || sw_reset || mcu_busy || std_rst != 8'd0 || load_reset
 // ------------------------------------------------------------------ loaders
 
 wire conf_wr, lwe;
-wire [15:0] conf_ai, laddr;
+wire [15:0] conf_ai;
+wire [20:0] laddr;
 wire [7:0] conf_di, lwdata;
 wire [4:0] cart_blk;
 
@@ -404,6 +409,100 @@ vic20_loader loader (
 	.cart_blk(cart_blk),
 	.hold_reset(load_reset)
 );
+
+// ------------------------------------------------------------------ tape
+
+wire treq, tack;
+wire [20:0] taddr;
+wire [7:0] tdata, tap_data;
+wire tap_restart, tap_wrreq, tap_wrfull, tap_error, tap_play_stop, cass_run, cass_motor, cass_sense, cass_read;
+wire [1:0] tap_version;
+
+vic20_tape tape (
+	.clk(clk_sys),
+	.reset(vic_reset),
+	.file_active(file_active),
+	.file_slot(file_slot),
+	.file_addr(file_addr),
+	.file_data(file_data),
+	.file_wr(file_wr),
+	.play(sw_tape_play),
+	.treq(treq),
+	.taddr(taddr),
+	.tdata(tdata),
+	.tack(tack),
+	.tap_restart(tap_restart),
+	.tap_version(tap_version),
+	.tap_data(tap_data),
+	.tap_wrreq(tap_wrreq),
+	.tap_wrfull(tap_wrfull),
+	.tap_error(tap_error),
+	.cass_run(cass_run),
+	.tap_play_stop(tap_play_stop)
+);
+
+// ------------------------------------------------------------------ Disk 8
+
+// img_sdc (the file mounter of the mcu) has the sd card interface of MiSTle that c1541_sd of
+// VIC20Nano uses: the request held until sdc_busy, the sector bytes as strobes with an address
+// while busy; for a write it copies the sector from the track buffer of the C1541, whose data
+// come a clock after the address through a mux (OUT_LATENCY 2)
+wire [7:0] sdc_img_mounted;
+wire [63:0] sdc_img_size;
+wire [31:0] disk_lba;
+wire disk_rd, disk_wr;
+wire sdc_busy, sdc_done, sdc_error, sdc_byte_in_strobe;
+wire [2:0] sdc_slot;
+wire [8:0] sdc_byte_addr;
+wire [7:0] sdc_byte_in_data, disk_out_data;
+wire img_active;
+
+img_sdc #(.OUT_LATENCY(2)) img_sdc (
+	.clk(clk_sys),
+	.reset(areset),
+
+	.img_mounted(img_mounted),
+	.img_size(img_size),
+	.img_data_wr(img_data_wr),
+	.img_data_addr(img_data_addr),
+	.img_data(img_data),
+	.img_result_wr(img_result_wr),
+	.img_result(img_result),
+	.img_sum(img_sum),
+	.img_q_wr(img_q_wr),
+	.img_q_di(img_q_di),
+	.img_q_ack(img_q_ack),
+
+	.sdc_img_mounted(sdc_img_mounted),
+	.sdc_img_size(sdc_img_size),
+	.sdc_rd({ 7'd0, disk_rd }),
+	.sdc_wr({ 7'd0, disk_wr }),
+	.sdc_sector(disk_lba),
+	.sdc_busy(sdc_busy),
+	.sdc_done(sdc_done),
+	.sdc_error(sdc_error),
+	.sdc_slot(sdc_slot),
+	.sdc_byte_in_strobe(sdc_byte_in_strobe),
+	.sdc_byte_addr(sdc_byte_addr),
+	.sdc_byte_in_data(sdc_byte_in_data),
+	.sdc_byte_out_data(disk_out_data),
+
+	.active(img_active)
+);
+
+// a mount (sdc_img_mounted[0], one clock with the size; size 0 = ejected) is a disk change for
+// the C1541; an image of 333744 bytes or more is a G64 (upstream), a change of the kind resets
+// the drive
+reg disk_change = 1'b0, disk_mount = 1'b0, disk_g64 = 1'b0, disk_g64_d = 1'b0;
+always @(posedge clk_sys) begin
+	disk_change <= sdc_img_mounted[0];
+	disk_g64_d <= disk_g64;
+	if (sdc_img_mounted[0]) begin
+		disk_mount <= sdc_img_size != 64'd0;
+		disk_g64 <= sdc_img_size >= 64'd333744;
+	end
+end
+wire disk_reset = vic_reset || (disk_g64 != disk_g64_d);
 
 // ------------------------------------------------------------------ the machine
 
@@ -463,34 +562,35 @@ vic20_core machine (
 	.conf_ai(conf_ai),
 	.conf_di(conf_di),
 
-	// Ф3: the C1541 on img_sdc
-	.disk_reset(vic_reset),
+	// the C1541 on img_sdc (slot 0)
+	.disk_reset(disk_reset),
 	.disk_pause(1'b0),
-	.disk_change(1'b0),
-	.disk_mount(1'b0),
-	.disk_readonly(1'b1),
-	.disk_g64(1'b0),
+	.disk_change(disk_change),
+	.disk_mount(disk_mount),
+	.disk_readonly(sw_disk_wp || img_wp[0]),
+	.disk_g64(disk_g64),
 	.disk_led(),
-	.sd_lba(),
-	.sd_rd(),
-	.sd_wr(),
-	.sd_ack(1'b0),
-	.sd_buff_addr(9'd0),
-	.sd_buff_dout(8'd0),
-	.sd_buff_din(),
-	.sd_buff_wr(1'b0),
+	.sd_lba(disk_lba),
+	.sd_rd(disk_rd),
+	.sd_wr(disk_wr),
+	.sd_ack(sdc_busy && sdc_slot == 3'd0),
+	.sd_buff_addr(sdc_byte_addr),
+	.sd_buff_dout(sdc_byte_in_data),
+	.sd_buff_din(disk_out_data),
+	.sd_buff_wr(sdc_byte_in_strobe && sdc_slot == 3'd0),
 
-	// Ф3: the C1530
-	.tap_restart(vic_reset),
-	.tap_version(2'd1),
-	.tap_data(8'd0),
-	.tap_wrreq(1'b0),
-	.tap_wrfull(),
-	.tap_play_stop(1'b0),
-	.cass_motor(),
-	.cass_sense(),
-	.cass_read(),
-	.cass_run(),
+	// the C1530 (vic20_tape)
+	.tap_restart(tap_restart),
+	.tap_version(tap_version),
+	.tap_data(tap_data),
+	.tap_wrreq(tap_wrreq),
+	.tap_wrfull(tap_wrfull),
+	.tap_error(tap_error),
+	.tap_play_stop(tap_play_stop),
+	.cass_motor(cass_motor),
+	.cass_sense(cass_sense),
+	.cass_read(cass_read),
+	.cass_run(cass_run),
 
 	.user_port_in(8'hFF),
 	.user_port_out(),
@@ -514,8 +614,12 @@ vic20_sram sram (
 	.cdata(extmem_din),
 	.cwe(extmem_sel && !extmem_r_wn && !ext_ro),
 	.cwdata(extmem_dout),
+	.treq(treq),
+	.taddr(taddr),
+	.tdata(tdata),
+	.tack(tack),
 	.lwe(lwe),
-	.laddr({ 5'd0, laddr }),
+	.laddr(laddr),
 	.lwdata(lwdata),
 	.MA(MA),
 	.MD(MD),
@@ -619,8 +723,10 @@ kg_osd_overlay #(.H_DIV4_WIDTH(1200), .H_OFFSET_IN(1), .V_OFFSET_IN(1)) osd (
 
 // ------------------------------------------------------------------ audio
 
-// the 6-bit sound of the VIC (unsigned) as a positive 16-bit sample, a quarter of full scale
-wire [15:0] aud = { 2'b00, vic_audio, 8'd0 };
+// the 6-bit sound of the VIC (unsigned) as a positive 16-bit sample, a quarter of full scale, and
+// the tape signal while it plays (upstream: cass_read with PLAY pressed and the motor on), quiet
+wire cass_aud = cass_read && !cass_sense && !cass_motor;
+wire [15:0] aud = { 2'b00, vic_audio, 8'd0 } + { 5'd0, cass_aud, 10'd0 };
 
 kg_pcm5102 #(.DIV_BITS(2)) dac (  // bck clk_sys / 8, lrck / 256 (140 / 127 kHz)
 	.clk(clk_sys),

@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "26111103",
+    "build": "26111104",
     "visible": true,
     "type": "osd",
     "order": 24,
@@ -23,7 +23,7 @@
             "type": "F",
             "name": "Disk 8",
             "slot": 0,
-            "extensions": ".d64",
+            "extensions": ".d64,.g64",
             "dir": "/vic20",
             "hotkey": "Menu+F1"
         },
