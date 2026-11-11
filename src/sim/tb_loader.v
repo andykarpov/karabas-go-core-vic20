@@ -10,6 +10,9 @@
  2. a cartridge at $A000 (8K + 2): all in the SRAM, cart_blk = $A000, hold_reset while it loads;
     eject clears cart_blk
  3. a Kernal (8K, no header): conf writes at $E000..$FFFF
+ 3b. a 32K DOS image (slot 6): dos_* writes, its last 16K stay; disk_hold while it loads
+ 3c. a Mega-Cart (slot 5, 4K of it here): mc_loaded, hold_reset, laddr from $200000, a
+     cartridge after it clears mc_loaded
  4. the machine side of vic20_sram: a write (cwe for 16 clocks), then a read of it and of a
     loader byte (cdata within 7 clocks)
 */
@@ -25,9 +28,21 @@ reg [31:0] file_addr = 32'd0;
 
 wire conf_wr, lwe, hold_reset;
 wire [15:0] conf_ai;
-wire [20:0] laddr;
+wire [21:0] laddr;
 wire [7:0] conf_di, lwdata;
 wire [4:0] cart_blk;
+wire mc_loaded, dos_wr, disk_hold;
+wire [13:0] dos_addr;
+wire [7:0] dos_data;
+reg [7:0] dos [0:16383];
+reg mega_addr_ok = 1'b1, mega_seen = 1'b0;
+always @(posedge clk) begin
+	if (dos_wr) dos[dos_addr] <= dos_data;
+	if (lwe && file_slot == 8'd5) begin
+		mega_seen <= 1'b1;
+		if (laddr !== 22'h200000 + file_addr[21:0]) mega_addr_ok <= 1'b0;
+	end
+end
 
 vic20_loader dut (
 	.clk(clk), .reset(1'b0),
@@ -35,7 +50,8 @@ vic20_loader dut (
 	.file_wr(file_wr), .eject(eject),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
-	.cart_blk(cart_blk), .hold_reset(hold_reset)
+	.cart_blk(cart_blk), .hold_reset(hold_reset),
+	.mc_loaded(mc_loaded), .dos_wr(dos_wr), .dos_addr(dos_addr), .dos_data(dos_data), .disk_hold(disk_hold)
 );
 
 reg [15:0] caddr = 16'd0;
@@ -48,8 +64,8 @@ wire [1:0] MWR_N, MRD_N;
 
 vic20_sram sram (
 	.clk(clk),
-	.caddr({ 5'd0, caddr }), .cdata(cdata), .cwe(cwe), .cwdata(cwdata),
-	.treq(1'b0), .taddr(21'd0), .tdata(), .tack(),
+	.caddr({ 6'd0, caddr }), .cdata(cdata), .cwe(cwe), .cwdata(cwdata),
+	.treq(1'b0), .taddr(22'd0), .tdata(), .tack(),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
 	.MA(MA), .MD(MD), .MWR_N(MWR_N), .MRD_N(MRD_N)
 );
@@ -153,6 +169,25 @@ initial begin
 	for (i = 0; i < 16'h2000; i = i + 1)
 		if (!conf_seen[16'hE000 + i] || conf[16'hE000 + i] !== ((i * 7) & 8'hFF)) ok = 1'b0;
 	check(ok, "Kernal at $E000 (conf)");
+
+	// 3b. DOS, 32K
+	fork
+		send_file(8'd6, 16'h0000, 1'b0, 16'h8000);
+		begin repeat (8) @(posedge clk); check(disk_hold, "disk_hold while a DOS loads"); end
+	join
+	ok = 1'b1;
+	for (i = 0; i < 16'h4000; i = i + 1)
+		if (dos[i] !== (((i + 16'h4000) * 7) & 8'hFF)) ok = 1'b0;
+	check(ok, "DOS: the last 16K of a 32K image");
+
+	// 3c. Mega-Cart (4K of it)
+	fork
+		send_file(8'd5, 16'h0000, 1'b0, 16'h1000);
+		begin repeat (8) @(posedge clk); check(hold_reset && mc_loaded, "hold_reset + mc_loaded while a Mega-Cart loads"); end
+	join
+	check(mc_loaded && mega_seen && mega_addr_ok, "Mega-Cart bytes at $200000 + offset");
+	send_file(8'd2, 16'hA000, 1'b1, 16'h0010);
+	check(!mc_loaded, "a cartridge takes the Mega-Cart out");
 
 	// 4. the machine: write $4123, read it back and a loader byte
 	@(negedge clk) begin caddr = 16'h4123; cwdata = 8'h5A; cwe = 1'b1; end

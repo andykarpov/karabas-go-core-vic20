@@ -24,7 +24,7 @@ reg [31:0] file_addr = 32'd0;
 
 wire conf_wr, lwe, hold_reset;
 wire [15:0] conf_ai;
-wire [20:0] laddr, taddr;
+wire [21:0] laddr, taddr;
 wire [7:0] conf_di, lwdata, tdata;
 wire [4:0] cart_blk;
 wire treq, tack;
@@ -35,7 +35,8 @@ vic20_loader loader (
 	.file_wr(file_wr), .eject(1'b0),
 	.conf_wr(conf_wr), .conf_ai(conf_ai), .conf_di(conf_di),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
-	.cart_blk(cart_blk), .hold_reset(hold_reset)
+	.cart_blk(cart_blk), .hold_reset(hold_reset),
+	.mc_loaded(), .dos_wr(), .dos_addr(), .dos_data(), .disk_hold()
 );
 
 wire tap_restart, tap_wrreq, tap_play_stop;
@@ -73,7 +74,7 @@ wire [15:0] MD;
 wire [1:0] MWR_N, MRD_N;
 vic20_sram sram (
 	.clk(clk),
-	.caddr(21'h001234), .cdata(cdata), .cwe(1'b0), .cwdata(8'd0),
+	.caddr(22'h001234), .cdata(cdata), .cwe(1'b0), .cwdata(8'd0),
 	.treq(treq), .taddr(taddr), .tdata(tdata), .tack(tack),
 	.lwe(lwe), .laddr(laddr), .lwdata(lwdata),
 	.MA(MA), .MD(MD), .MWR_N(MWR_N), .MRD_N(MRD_N)

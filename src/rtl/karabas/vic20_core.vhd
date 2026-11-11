@@ -80,6 +80,9 @@ entity vic20_core is
     disk_readonly : in  std_logic;
     disk_g64      : in  std_logic;
     disk_led      : out std_logic;
+    dos_wr        : in  std_logic;  -- a DOS ROM file: a byte into the 16K ROM of the drive
+    dos_addr      : in  std_logic_vector(13 downto 0);
+    dos_data      : in  std_logic_vector(7 downto 0);
     sd_lba        : out std_logic_vector(31 downto 0);
     sd_rd         : out std_logic;
     sd_wr         : out std_logic;
@@ -114,17 +117,21 @@ end;
 
 architecture rtl of vic20_core is
 
-  component kg_sprom
+  component kg_sdpram
     generic (
       DW        : integer := 8;
       AW        : integer := 10;
       INIT_FILE : string  := ""
     );
     port (
-      clk  : in  std_logic;
-      en   : in  std_logic;
-      addr : in  std_logic_vector(AW-1 downto 0);
-      dout : out std_logic_vector(DW-1 downto 0)
+      clka  : in  std_logic;
+      wea   : in  std_logic;
+      addra : in  std_logic_vector(AW-1 downto 0);
+      dina  : in  std_logic_vector(DW-1 downto 0);
+      clkb  : in  std_logic;
+      enb   : in  std_logic;
+      addrb : in  std_logic_vector(AW-1 downto 0);
+      doutb : out std_logic_vector(DW-1 downto 0)
     );
   end component;
 
@@ -279,17 +286,21 @@ begin
     );
 
   -- DOS ROM $C000-$FFFF (upstream reads 32K banks of the SPI flash: CBM, Dolphin, SpeedDOS,
-  -- JiffyDOS; the others come later as user files). Read every clock: the data are there
-  -- long before the cpu takes them (16 clocks after c1541rom_cs).
+  -- JiffyDOS): CBM DOS 2.6 at the start, a DOS file (dos_*, e.g. JiffyDOS) replaces it. Read
+  -- every clock: the data are there long before the cpu takes them (16 clocks after c1541rom_cs).
   c1541rom_a14 <= c1541rom_addr(13 downto 0);
 
-  c1541_rom : kg_sprom
+  c1541_rom : kg_sdpram
     generic map (DW => 8, AW => 14, INIT_FILE => "rom/c1541-325302-01_901229-06aa.hex")
     port map (
-      clk  => clk_sys,
-      en   => '1',
-      addr => c1541rom_a14,
-      dout => c1541rom_data
+      clka  => clk_sys,
+      wea   => dos_wr,
+      addra => dos_addr,
+      dina  => dos_data,
+      clkb  => clk_sys,
+      enb   => '1',
+      addrb => c1541rom_a14,
+      doutb => c1541rom_data
     );
 
   tape : entity work.c1530
