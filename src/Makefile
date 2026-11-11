@@ -8,7 +8,7 @@
 #   make minig           one board: synthesis, implementation, bitstream, .kg file
 #   make minig-xst       one step: <board>-xst (.ngc), <board>-impl (.bin), <board>-core (.kg)
 #   make minig-report    LUTs, slices, block RAMs and the timing result of the last build
-# (go and mini come in Ф5)
+# go and mini: rtl/karabas_{go,mini}_top.v are made from the Mini G top by tools/mktops.py
 #
 # Inputs per board: karabas_<board>.prj (the source list, the shared modules as
 # "../modules/rtl/..."), karabas_<board>.xst, karabas_<board>.ut, karabas_<board>.ucf.
@@ -22,11 +22,13 @@ SHELL = /bin/bash
 # settings64.sh takes the arguments of the shell that sources it: none here
 XIL = source $(ISE_SETTINGS) > /dev/null;
 
-BOARDS = minig
+BOARDS = go mini minig
 KG = vic20.kg
 JSON = core.json
 
 # map / par options (cost table 2 by default, the rule of all the cores)
+MAP_T_go ?= 2
+MAP_T_mini ?= 2
 MAP_T_minig ?= 2
 MAP = -logic_opt off -ol high -xe n -xt 3 -register_duplication off -r 4 -global_opt off -mt 2 -detail -ir off -pr b -lc auto -power off
 PAR = -ol high -xe c -mt 4
@@ -69,6 +71,10 @@ $(1)-report:
 endef
 
 $(foreach b,$(BOARDS),$(eval $(call board,$(b))))
+
+# the Go and Mini tops are made from the Mini G top
+rtl/karabas_go_top.v rtl/karabas_mini_top.v &: rtl/karabas_minig_top.v tools/mktops.py tools/ports/karabas_go_ports.v tools/ports/karabas_mini_ports.v
+	python3 tools/mktops.py
 
 vic20.ngc: vic20.prj vic20.xst $(call prj_src,vic20.prj) $(INCLUDES)
 	mkdir -p xst/projnav.tmp

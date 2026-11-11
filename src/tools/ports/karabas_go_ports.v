@@ -1,0 +1,91 @@
+module karabas_go_top (
+	input wire CLK_50MHZ,
+
+	inout wire UART_RX,
+	inout wire UART_TX,
+	inout wire UART_CTS,
+	inout wire ESP_RESET_N,
+	inout wire ESP_BOOT_N,
+
+	output wire [20:0] MA,
+	inout wire [15:0] MD,
+	output wire [1:0] MWR_N,
+	output wire [1:0] MRD_N,
+
+	output wire [1:0] SDR_BA,
+	output wire [12:0] SDR_A,
+	output wire SDR_CLK,
+	output wire [1:0] SDR_DQM,
+	output wire SDR_WE_N,
+	output wire SDR_CAS_N,
+	output wire SDR_RAS_N,
+	inout wire [15:0] SDR_DQ,
+
+	output wire SD_CS_N,
+	output wire SD_CLK,
+	output wire SD_DI,
+	input wire SD_DO,
+	input wire SD_DET_N,
+
+	output wire [7:0] VGA_R,
+	output wire [7:0] VGA_G,
+	output wire [7:0] VGA_B,
+	output wire VGA_HS,
+	output wire VGA_VS,
+	output wire V_CLK,
+
+	output wire FT_SPI_CS_N,
+	output wire FT_SPI_SCK,
+	input wire FT_SPI_MISO,
+	output wire FT_SPI_MOSI,
+	input wire FT_INT_N,
+	input wire FT_CLK,
+	output wire FT_OE_N,
+
+	output wire [2:0] WA,
+	output wire [1:0] WCS_N,
+	output wire WRD_N,
+	output wire WWR_N,
+	output wire WRESET_N,
+	inout wire [15:0] WD,
+
+	input wire FDC_INDEX,
+	output wire [1:0] FDC_DRIVE,
+	output wire FDC_MOTOR,
+	output wire FDC_DIR,
+	output wire FDC_STEP,
+	output wire FDC_WDATA,
+	output wire FDC_WGATE,
+	input wire FDC_TR00,
+	input wire FDC_WPRT,
+	input wire FDC_RDATA,
+	output wire FDC_SIDE_N,
+
+	output wire TAPE_OUT,
+	input wire TAPE_IN,
+	output wire BEEPER,
+
+	output wire DAC_LRCK,
+	output wire DAC_DAT,
+	output wire DAC_BCK,
+	output wire DAC_MUTE,
+
+	input wire MCU_CS_N,
+	input wire MCU_SCK,
+	inout wire MCU_MOSI,
+	output wire MCU_MISO,
+	input wire MCU_SPI_FT_CS_N,
+	input wire MCU_SPI_SD2_CS_N,
+	inout wire [1:0] MCU_SPI_IO, // [0] burst ready (firmware IO1, GPIO2), [1] burst cs_n (IO0, GPIO14)
+
+	output wire MIDI_TX,
+	output wire MIDI_CLK,
+	output wire MIDI_RESET_N,
+
+	output wire FLASH_CS_N,
+	input wire FLASH_DO,
+	output wire FLASH_DI,
+	output wire FLASH_SCK,
+	output wire FLASH_WP_N,
+	output wire FLASH_HOLD_N
+);
