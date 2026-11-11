@@ -22,7 +22,7 @@
 
  Soft switches (the index of the item in the osd of core.json, the "index" of the items):
    6 RAM (None / 3K / 8K / 16K / 24K / 3K+24K / 35K)   7 Video (PAL / NTSC)   8 Disk 8 WP
-   9 Tape play   10 Eject cart   11 Reset
+   9 Tape play   10 Eject cart   11 Reset   12 Keyboard (Symbolic / Positional)
 */
 
 module karabas_minig_top (
@@ -330,8 +330,8 @@ assign SD_CLK = mcu_sck_ibufg;
 
 // ------------------------------------------------------------------ soft switches
 
-wire [12*8-1:0] sw;
-kg_soft_switches #(.N(12)) soft_switches (
+wire [13*8-1:0] sw;
+kg_soft_switches #(.N(13)) soft_switches (
 	.clk(clk_sys),
 	.command(softsw_command),
 	.regs(sw),
@@ -341,6 +341,7 @@ wire [2:0] sw_ram = sw[6*8 +: 3];
 assign sw_ntsc = sw[7*8];
 wire sw_eject = sw[10*8];
 wire sw_reset = sw[11*8];
+wire sw_positional = sw[12*8];   // Keyboard: 0 Symbolic, 1 Positional
 
 // RAM expansion of the switch, in ram_ext order ($A000, $6000, $4000, $2000, $0400)
 reg [4:0] ram_sw;
@@ -534,6 +535,7 @@ vic20_hid hid (
 	.kb_dat5(kb_dat5),
 	.joy_l(joy_l),
 	.joy_r(joy_r),
+	.symbolic(!sw_positional),
 	.matrix_out(kbd_matrix_out),
 	.matrix_in(kbd_matrix_in),
 	.restore_n(restore_n),
