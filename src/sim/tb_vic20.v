@@ -52,6 +52,12 @@ module tb_vic20 (
 	output wire vblank,
 	output wire [5:0] audio,
 
+	// the scandoubler of the board tops on the picture (the geometry of the HDMI frame)
+	output wire sd_hs_n,
+	output wire sd_vs_n,
+	output wire sd_hb,
+	output wire sd_vb,       // the vertical blank of the tops: vblank of the VIC at each doubled line
+
 	// the external memory bus, for the harness (dumps, checks)
 	output wire extmem_sel,
 	output wire extmem_r_wn,
@@ -156,5 +162,37 @@ module tb_vic20 (
 		.user_cb2_in(1'b1),
 		.user_cb2_out()
 	);
+
+	scandoubler #(.HCNT_WIDTH(10)) doubler (
+		.clk_sys(clk_sys),
+		.bypass(1'b0),
+		.ce_divider(3'd1),
+		.pixel_ena(),
+		.scanlines(2'b00),
+		.hb_in(hblank),
+		.vb_in(vblank),
+		.hs_in(hsync),
+		.vs_in(vsync),
+		.r_in(video_r),
+		.g_in(video_g),
+		.b_in(video_b),
+		.hb_out(sd_hb),
+		.vb_out(),
+		.hs_out(sd_hs_n),
+		.vs_out(sd_vs_n),
+		.r_out(),
+		.g_out(),
+		.b_out()
+	);
+
+	// as the tops: the vblank of the VIC taken at the start of each doubled line (vb_out of the
+	// scandoubler is lost: its 10-bit sample counter wraps in the 1136 samples of a line)
+	reg sd_hs_d = 1'b1, vb_line = 1'b1;
+	always @(posedge clk_sys) begin
+		sd_hs_d <= sd_hs_n;
+		if (sd_hs_d && !sd_hs_n)
+			vb_line <= vblank;
+	end
+	assign sd_vb = vb_line;
 
 endmodule

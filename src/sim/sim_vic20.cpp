@@ -1,6 +1,6 @@
 // sim_vic20.cpp: the verilator harness of tb_vic20 (vic20_core + the external memory).
 //
-//   clk_sys 35.484 MHz (PAL, DCM 50 * 22 / 31) or 32.759 MHz (NTSC, 50 * 19 / 29)
+//   clk_sys 35.465 MHz (PAL) or 32.727 MHz (NTSC), as vic20_clk
 //   keyboard: the VIC-20 matrix (row = bit of kbd_matrix_out = VIA2 port B, column = bit of
 //             kbd_matrix_in = VIA2 port A), from text typed at a time
 //   SD card: the sector interface of img_sdc / MiSTle sd_card for the C1541 (one .d64)
@@ -18,6 +18,7 @@
 //   --text             print the screen text of the last frame
 //   --expect TEXT      exit 1 unless the last screen contains TEXT
 //   --trace-sd         print the SD requests
+//   --geometry         print the timing of the doubled frame (scandoubler of the tops) per frame
 #include "Vtb_vic20.h"
 #include "verilated.h"
 #include <cstdio>
@@ -28,7 +29,7 @@
 
 static Vtb_vic20 *top;
 static uint64_t cycles = 0;
-static double SYS_HZ = 50e6 * 22 / 31;
+static double SYS_HZ = 50e6 * 61 / 86;   // vic20_clk: 35.465 MHz
 static uint64_t ms_to_cycles(double ms) { return (uint64_t)(ms * SYS_HZ / 1000.0); }
 static double now_ms() { return cycles * 1000.0 / SYS_HZ; }
 
@@ -304,6 +305,40 @@ static std::string screen_text() {
 	return s;
 }
 
+// ---------------------------------------------------------------- the doubled frame
+// clocks per line and lines per frame of the scandoubler output, and where de (no blanking) is
+// from the leading (falling) edge of its syncs; printed with --geometry
+static bool geo = false;
+static uint64_t g_line = 0, g_hs_at = 0;
+static int g_hlen = 0, g_lines = 0, g_frame_lines = 0, g_de_x0 = -1, g_de_w = 0, g_de_y0 = -1, g_de_h = 0;
+static int g_cur_x0 = -1, g_cur_w = 0, g_hs_w = 0, g_vs_w = 0, g_vs_line = 0;
+static bool g_old_hs = true, g_old_vs = true, g_old_de = false, g_line_de = false;
+static int g_frames = 0;
+static void geo_step() {
+	bool hs = top->sd_hs_n, vs = top->sd_vs_n, de = !top->sd_hb && !top->sd_vb;
+	int x = (int)(cycles - g_hs_at);
+	if (de && !g_old_de) g_cur_x0 = x;
+	if (!de && g_old_de) g_cur_w = x - g_cur_x0;
+	if (de) g_line_de = true;
+	if (!hs && g_old_hs) {   // a line
+		g_hlen = x;
+		g_hs_at = cycles;
+		if (g_line_de) { if (g_de_y0 < 0) g_de_y0 = g_lines; g_de_h = g_lines - g_de_y0 + 1; g_de_x0 = g_cur_x0; g_de_w = g_cur_w; }
+		g_line_de = false;
+		g_lines++;
+	}
+	if (hs && !g_old_hs) g_hs_w = x;
+	if (!vs && g_old_vs) {   // a frame
+		if (g_frames >= 2)
+			printf("geometry: line %d clocks (hs %d), frame %d lines (vs %d), de x %d w %d, y %d h %d\n",
+				g_hlen, g_hs_w, g_lines, g_vs_w, g_de_x0, g_de_w, g_de_y0, g_de_h);
+		g_frames++;
+		g_frame_lines = g_lines; g_lines = 0; g_de_y0 = -1; g_vs_line = 0;
+	}
+	if (vs && !g_old_vs) g_vs_w = g_lines;
+	g_old_hs = hs; g_old_vs = vs; g_old_de = de;
+}
+
 // ---------------------------------------------------------------- main
 int main(int argc, char **argv) {
 	Verilated::commandArgs(argc, argv);
@@ -326,9 +361,10 @@ int main(int argc, char **argv) {
 		else if (a == "--text") text = true;
 		else if (a == "--expect" && i + 1 < argc) expect = argv[++i];
 		else if (a == "--trace-sd") trace_sd = true;
+		else if (a == "--geometry") geo = true;
 		else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
 	}
-	if (ntsc) SYS_HZ = 50e6 * 19 / 29;
+	if (ntsc) SYS_HZ = 50e6 * 36 / 55;      // 32.727 MHz
 	for (auto &t : typed) type_text(t.ms, t.s.c_str());
 	if (prg) {
 		if (!load_prg(prg)) { fprintf(stderr, "can't read %s\n", prg); return 1; }
@@ -354,6 +390,7 @@ int main(int argc, char **argv) {
 		top->clk_sys = 1;
 		top->eval();
 		pixel_step();
+		if (geo) geo_step();
 		cycles++;
 
 		if (cycles == ms_to_cycles(1)) { top->reset = 0; top->disk_reset = 0; }

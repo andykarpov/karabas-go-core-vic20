@@ -7,6 +7,8 @@
  mapped into the 0x68+ range.
 */
 
+// karabas: the keys that the VIC-20 does not have gave the left shift (a stuck shift with the
+// numpad or F12): no key now; the keypad gives its digits and signs
 module keymap (
   input [6:0]  code,
   output [3:0] row,
@@ -90,7 +92,7 @@ assign { row,column } // vice versa than AtariST
   (code == 7'h28)?{ 4'd1,3'd7}: // 28: return
   (code == 7'h29)?{ 4'd3,3'd0}: // 29: esc  as run/stop
   (code == 7'h2a)?{ 4'd0,3'd7}: // 2a: backspace as del
-  (code == 7'h2b)?{ 4'd3,3'd1}: // lshift // 2b: tab
+  (code == 7'h2b)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 2b: tab
   (code == 7'h2c)?{ 4'd4,3'd0}: // 2c: space
 
   (code == 7'h2d)?{ 4'd7,3'd5}: // 2d: - as -
@@ -119,53 +121,53 @@ assign { row,column } // vice versa than AtariST
   (code == 7'h42)?{ 4'd6,3'd6}: // 42: F9
   (code == 7'h43)?{ 4'd5,3'd6}: // 43: F10
 //(code == 7'h44)?{ 4'd3,3'd1}: // 44: F11
-  (code == 7'h45)?{ 4'd3,3'd1}: // 45: F12 (OSD)
+  (code == 7'h45)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // 45: F12 (OSD)
 
-  (code == 7'h46)?{ 4'd3,3'd1}: // lshift // 46: PrtScr
-  (code == 7'h47)?{ 4'd3,3'd1}: // lshift // 47: Scroll Lock
-  (code == 7'h48)?{ 4'd3,3'd1}: // lshift // 48: Pause
+  (code == 7'h46)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 46: PrtScr
+  (code == 7'h47)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 47: Scroll Lock
+  (code == 7'h48)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 48: Pause
   (code == 7'h49)?{ 4'd0,3'd7}: // 49: Insert as DEL
   (code == 7'h4a)?{ 4'd7,3'd6}: // 4a: Home fix
-  (code == 7'h4b)?{ 4'd3,3'd1}: // lshift // 4b: PageUp
+  (code == 7'h4b)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 4b: PageUp
   (code == 7'h4c)?{ 4'd0,3'd7}: // 4c: Delete as DEL
-  (code == 7'h4d)?{ 4'd3,3'd1}: // lshift // 4d: End
-  (code == 7'h4e)?{ 4'd3,3'd1}: // lshift // 4e: PageDown
+  (code == 7'h4d)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 4d: End
+  (code == 7'h4e)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 4e: PageDown
   
   // cursor keys
   (code == 7'h4f)?{ 4'd2,3'd7}: // 4f: right
   (code == 7'h50)?{ 4'd2,3'd7}: // 50: left
   (code == 7'h51)?{ 4'd3,3'd7}: // 51: down
   (code == 7'h52)?{ 4'd3,3'd7}: // 52: up
-  (code == 7'h53)?{ 4'd3,3'd1}: // lshift // 53: Num Lock
+  (code == 7'h53)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // lshift // 53: Num Lock
 
   // keypad
-  (code == 7'h54)?{ 4'd3,3'd1}: // 54: KP /
-  (code == 7'h55)?{ 4'd3,3'd1}: // 55: KP *
-  (code == 7'h56)?{ 4'd3,3'd1}: // 56: KP -
-  (code == 7'h57)?{ 4'd3,3'd1}: // 57: KP +
-  (code == 7'h58)?{ 4'd3,3'd1}: // 58: KP Enter
-  (code == 7'h59)?{ 4'd3,3'd1}: // 59: KP 1
-  (code == 7'h5a)?{ 4'd3,3'd1}: // 5a: KP 2
-  (code == 7'h5b)?{ 4'd3,3'd1}: // 5b: KP 3
-  (code == 7'h5c)?{ 4'd3,3'd1}: // 5c: KP 4
-  (code == 7'h5d)?{ 4'd3,3'd1}: // 5d: KP 5
-  (code == 7'h5e)?{ 4'd3,3'd1}: // 5e: KP 6
-  (code == 7'h5f)?{ 4'd3,3'd1}: // 5f: KP 7
-  (code == 7'h60)?{ 4'd3,3'd1}: // 60: KP 8
-  (code == 7'h61)?{ 4'd3,3'd1}: // 61: KP 9
-  (code == 7'h62)?{ 4'd3,3'd1}: // 62: KP 0
-  (code == 7'h63)?{ 4'd3,3'd1}: // 63: KP .
-  (code == 7'h64)?{ 4'd3,3'd1}: // 64: EUR-2
+  (code == 7'h54)?{ 4'd3,3'd6}: // 54: KP / as / (karabas: was left shift)
+  (code == 7'h55)?{ 4'd1,3'd6}: // 55: KP * as * (karabas: was left shift)
+  (code == 7'h56)?{ 4'd7,3'd5}: // 56: KP - as - (karabas: was left shift)
+  (code == 7'h57)?{ 4'd0,3'd5}: // 57: KP + as + (karabas: was left shift)
+  (code == 7'h58)?{ 4'd1,3'd7}: // 58: KP Enter as Return (karabas: was left shift)
+  (code == 7'h59)?{ 4'd0,3'd0}: // 59: KP 1 as 1 (karabas: was left shift)
+  (code == 7'h5a)?{ 4'd7,3'd0}: // 5a: KP 2 as 2 (karabas: was left shift)
+  (code == 7'h5b)?{ 4'd0,3'd1}: // 5b: KP 3 as 3 (karabas: was left shift)
+  (code == 7'h5c)?{ 4'd7,3'd1}: // 5c: KP 4 as 4 (karabas: was left shift)
+  (code == 7'h5d)?{ 4'd0,3'd2}: // 5d: KP 5 as 5 (karabas: was left shift)
+  (code == 7'h5e)?{ 4'd7,3'd2}: // 5e: KP 6 as 6 (karabas: was left shift)
+  (code == 7'h5f)?{ 4'd0,3'd3}: // 5f: KP 7 as 7 (karabas: was left shift)
+  (code == 7'h60)?{ 4'd7,3'd3}: // 60: KP 8 as 8 (karabas: was left shift)
+  (code == 7'h61)?{ 4'd0,3'd4}: // 61: KP 9 as 9 (karabas: was left shift)
+  (code == 7'h62)?{ 4'd7,3'd4}: // 62: KP 0 as 0 (karabas: was left shift)
+  (code == 7'h63)?{ 4'd4,3'd5}: // 63: KP . as . (karabas: was left shift)
+  (code == 7'h64)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // 64: EUR-2
 
   // remapped modifier keys
   (code == 7'h68)?{ 4'd2,3'd0}: // 68: left ctrl
   (code == 7'h69)?{ 4'd3,3'd1}: // 69: left shift
   (code == 7'h6a)?{ 4'd5,3'd0}: // 6a: left alt
-  (code == 7'h6b)?{ 4'd3,3'd1}: // 6b: left meta
+  (code == 7'h6b)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // 6b: left meta
   (code == 7'h6c)?{ 4'd2,3'd0}: // 6c: right ctrl
   (code == 7'h6d)?{ 4'd4,3'd6}: // 6d: right shift
   (code == 7'h6e)?{ 4'd5,3'd0}: // 6e: right alt
-  (code == 7'h6f)?{ 4'd3,3'd1}: // 6f: right meta
+  (code == 7'h6f)?{ 4'd8,3'd0}: // karabas: no key (was left shift) // // 6f: right meta
   { 4'd8,3'd0};
   
 endmodule

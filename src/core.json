@@ -1,7 +1,7 @@
 {
     "id": "vic20",
     "name": "Commodore VIC-20",
-    "build": "00000000",
+    "build": "26111102",
     "visible": true,
     "type": "osd",
     "order": 24,
@@ -66,7 +66,15 @@
             "index": 6,
             "type": "S",
             "name": "RAM",
-            "options": ["None", "3K", "8K", "16K", "24K", "3K+24K"],
+            "options": [
+                "None",
+                "3K",
+                "8K",
+                "16K",
+                "24K",
+                "3K+24K",
+                "35K"
+            ],
             "default": 0,
             "hotkey": "Menu+M"
         },
@@ -74,7 +82,10 @@
             "index": 7,
             "type": "S",
             "name": "Video",
-            "options": ["PAL", "NTSC"],
+            "options": [
+                "PAL",
+                "NTSC"
+            ],
             "default": 0,
             "hotkey": "Menu+V"
         },
@@ -82,7 +93,10 @@
             "index": 8,
             "type": "S",
             "name": "Disk 8 WP",
-            "options": ["Off", "On"],
+            "options": [
+                "Off",
+                "On"
+            ],
             "default": 0
         },
         {
