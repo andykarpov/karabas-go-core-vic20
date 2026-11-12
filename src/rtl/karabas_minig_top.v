@@ -203,6 +203,14 @@ wire [14*8-1:0] sw;
 wire mcu_busy;
 wire dvi_only;
 wire ft_cs_n, ft_mosi, ft_spi_on, sd2_cs_n, sd2_mosi;
+wire osd_wr, osd_en, osd_zoom;
+wire [11:0] osd_waddr;
+wire [7:0] osd_wdata;
+wire [23:0] osd_fg, osd_bg;
+wire [1:0] osd_alpha, osd_place;
+wire [4:0] osd_px, osd_ph;
+wire [3:0] osd_py;
+wire [5:0] osd_pw;
 
 kg_mcu2 #(
 	.CAPS(16'h0000),
@@ -262,6 +270,10 @@ kg_mcu2 #(
 	.LD_WR(ld_wr),
 	.LD_READY(1'b1),
 
+	.OSD_WR(osd_wr), .OSD_WADDR(osd_waddr), .OSD_WDATA(osd_wdata), .OSD_EN(osd_en),
+	.OSD_FG(osd_fg), .OSD_BG(osd_bg), .OSD_ALPHA(osd_alpha), .OSD_PX(osd_px), .OSD_PY(osd_py),
+	.OSD_PW(osd_pw), .OSD_PH(osd_ph), .OSD_PLACE(osd_place), .OSD_ZOOM(osd_zoom),
+
 	.FT_SPI_ON(ft_spi_on),
 	.FT_VGA_ON(),
 	.FT_RESET(),
@@ -285,8 +297,7 @@ wire [7:0] file_slot = ld_slot, file_data = ld_data;
 wire [31:0] file_addr = ld_addr;
 wire file_on;
 
-// the file mounter (Disk 8, MC NVRAM) and the OSD come with phases 3 / 4 of link v2: no image,
-// no overlay
+// the file mounter (Disk 8, MC NVRAM) comes with phase 4 of link v2: no image
 wire [7:0] img_mounted = 8'd0, img_data = 8'd0, img_result = 8'd0, img_wp = 8'd0;
 wire [63:0] img_size = 64'd0;
 wire img_data_wr = 1'b0, img_result_wr = 1'b0, img_q_ack = 1'b0;
@@ -294,7 +305,6 @@ wire [8:0] img_data_addr = 9'd0;
 wire [15:0] img_sum = 16'd0;
 wire img_q_wr;
 wire [23:0] img_q_di;
-wire [15:0] osd_command = 16'd0;
 
 assign FT_SPI_CS_N = ft_spi_on ? ft_cs_n : 1'b1;
 assign FT_SPI_SCK = ft_spi_on ? mcu_sck_ibufg : 1'b1;
@@ -772,22 +782,18 @@ always @(posedge clk_sys) begin
 	vid_vs <= !sd_vs_n;
 end
 
-// the OSD of the mcu (512 x 416: a step per 2 clocks, per 2 lines) in the middle of de:
-//   PAL  clocks 195 + (912 - 512) / 2 = 395, lines 46 + (576 - 416) / 2 = 126
-//   NTSC clocks 179 + (816 - 512) / 2 = 331, lines 36 + (480 - 416) / 2 = 68
-reg [15:0] osd_cmd = 16'd0;
-always @(posedge clk_sys)
-	osd_cmd <= osd_command;
+// the bitmap OSD of link v2 (kg_l2_osd_overlay): centred in de, the scale from its size (2 at
+// 720 x 576 / 720 x 480), 2 clocks of latency with its syncs and de
 wire [23:0] osd_rgb;
-kg_osd_overlay #(.H_DIV4_WIDTH(1200), .H_OFFSET_IN(1), .V_OFFSET_IN(1)) osd (
+wire osd_hs, osd_vs, osd_de;
+kg_l2_osd_overlay osd (
+	.wclk(clk_sys),
+	.osd_wr(osd_wr), .osd_waddr(osd_waddr), .osd_wdata(osd_wdata), .osd_en(osd_en),
+	.osd_fg(osd_fg), .osd_bg(osd_bg), .osd_alpha(osd_alpha), .osd_px(osd_px), .osd_py(osd_py),
+	.osd_pw(osd_pw), .osd_ph(osd_ph), .osd_place(osd_place), .osd_zoom(osd_zoom),
 	.clk(clk_sys),
-	.rgb_i(vid_rgb),
-	.rgb_o(osd_rgb),
-	.hsync_i(vid_hs),
-	.vsync_i(vid_vs),
-	.v_offset(ntsc ? 11'd34 : 11'd63),
-	.h_offset(ntsc ? 11'd165 : 11'd197),
-	.osd_command(osd_cmd)
+	.rgb_i(vid_rgb), .hs_i(vid_hs), .vs_i(vid_vs), .de_i(vid_de),
+	.rgb_o(osd_rgb), .hs_o(osd_hs), .vs_o(osd_vs), .de_o(osd_de)
 );
 
 // ------------------------------------------------------------------ audio
@@ -832,9 +838,9 @@ hdmi_tx #(.SAMPLE_FREQ(48000)) hdmi (
 	.sclk_n(clk_x5_n),
 	.reset(areset || std_rst != 8'd0),
 	.rgb(osd_rgb),
-	.vsync(~vid_vs),
-	.hsync(~vid_hs),
-	.de(vid_de),
+	.vsync(~osd_vs),
+	.hsync(~osd_hs),
+	.de(osd_de),
 	.audio_en(~dvi_only),
 	.audio_l(hdmi_a),
 	.audio_r(hdmi_a),
