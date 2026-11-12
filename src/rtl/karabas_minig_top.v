@@ -25,7 +25,8 @@
  SRAM map (bytes): 000000 the VIC space, 0F0000 NVRAM (written, no longer read), 100000 tape,
  200000 Mega-Cart ROM.
  Mouse: Paddles = the two paddles of the VIC (x / y), the buttons their fire (joy left / right).
- Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through img_sdc.
+ Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through the file
+ mounter of kg_mcu2 (kg_l2_img, the sd card interface of img_sdc).
 
  Soft switches (the index of the item in the osd of core.json, the "index" of the items):
    6 RAM (None / 3K / 8K / 16K / 24K / 3K+24K / 35K)   7 Video (PAL / NTSC)   8 Disk 8 WP
@@ -212,8 +213,33 @@ wire [4:0] osd_px, osd_ph;
 wire [3:0] osd_py;
 wire [5:0] osd_pw;
 
+// ------------------------------------------------------------------ Disk 8 (the nets)
+
+// the file mounter of kg_mcu2 (kg_l2_img, link v2) has the sd card interface of img_sdc, the one of
+// MiSTle that c1541_sd of VIC20Nano uses: the request held until sdc_busy, the sector bytes as strobes with an address
+// while busy; for a write it copies the sector from the track buffer of the C1541, whose data
+// come a clock after the address through a mux (OUT_LATENCY 2)
+wire [7:0] sdc_img_mounted, img_wp;
+wire [63:0] sdc_img_size;
+wire [31:0] disk_lba;
+wire disk_rd, disk_wr;
+wire sdc_busy, sdc_done, sdc_error, sdc_byte_in_strobe;
+wire [2:0] sdc_slot;
+wire [8:0] sdc_byte_addr;
+wire [7:0] sdc_byte_in_data, disk_out_data;
+wire img_active;
+// the NVRAM of the Mega-Cart (index 7): its sector while only it asks (index 0, the drive, goes
+// first), its bytes while its request runs
+wire nv_rd, nv_wr;
+wire [3:0] nv_sector;
+wire [7:0] nv_out_data;
+wire [31:0] sdc_sector = (disk_rd || disk_wr) ? disk_lba : { 28'd0, nv_sector };
+wire [7:0] sdc_out_data = (sdc_slot == 3'd7) ? nv_out_data : disk_out_data;
+
 kg_mcu2 #(
-	.CAPS(16'h0000),
+	.CAPS(16'h0005),
+	.ENABLE_IMG(1),
+	.IMG_OUT_LATENCY(2),
 	.SW_N(14),
 	.CS_FILTER(3),
 	.ENABLE_FT(1),
@@ -274,6 +300,14 @@ kg_mcu2 #(
 	.OSD_FG(osd_fg), .OSD_BG(osd_bg), .OSD_ALPHA(osd_alpha), .OSD_PX(osd_px), .OSD_PY(osd_py),
 	.OSD_PW(osd_pw), .OSD_PH(osd_ph), .OSD_PLACE(osd_place), .OSD_ZOOM(osd_zoom),
 
+	.SDC_IMG_MOUNTED(sdc_img_mounted), .SDC_IMG_SIZE(sdc_img_size),
+	.SDC_RD({ nv_rd, 6'd0, disk_rd }), .SDC_WR({ nv_wr, 6'd0, disk_wr }), .SDC_SECTOR(sdc_sector),
+	.SDC_BUSY(sdc_busy), .SDC_DONE(sdc_done), .SDC_ERROR(sdc_error), .SDC_SLOT(sdc_slot),
+	.SDC_BYTE_IN_STROBE(sdc_byte_in_strobe), .SDC_BYTE_ADDR(sdc_byte_addr),
+	.SDC_BYTE_IN_DATA(sdc_byte_in_data), .SDC_BYTE_OUT_DATA(sdc_out_data),
+	.IMG_WP(img_wp), .IMG_PHYS_WR(), .IMG_PHYS(), .IMG_FLUSH(), .FDD_CHNG_WR(), .FDD_CHNG(),
+	.FDD_CHNG_REQ(1'b0), .FDD_CHNG_DS(2'd0), .IMG_ACTIVE(img_active),
+
 	.FT_SPI_ON(ft_spi_on),
 	.FT_VGA_ON(),
 	.FT_RESET(),
@@ -297,14 +331,6 @@ wire [7:0] file_slot = ld_slot, file_data = ld_data;
 wire [31:0] file_addr = ld_addr;
 wire file_on;
 
-// the file mounter (Disk 8, MC NVRAM) comes with phase 4 of link v2: no image
-wire [7:0] img_mounted = 8'd0, img_data = 8'd0, img_result = 8'd0, img_wp = 8'd0;
-wire [63:0] img_size = 64'd0;
-wire img_data_wr = 1'b0, img_result_wr = 1'b0, img_q_ack = 1'b0;
-wire [8:0] img_data_addr = 9'd0;
-wire [15:0] img_sum = 16'd0;
-wire img_q_wr;
-wire [23:0] img_q_di;
 
 assign FT_SPI_CS_N = ft_spi_on ? ft_cs_n : 1'b1;
 assign FT_SPI_SCK = ft_spi_on ? mcu_sck_ibufg : 1'b1;
@@ -433,59 +459,8 @@ vic20_tape tape (
 
 // ------------------------------------------------------------------ Disk 8
 
-// img_sdc (the file mounter of the mcu) has the sd card interface of MiSTle that c1541_sd of
-// VIC20Nano uses: the request held until sdc_busy, the sector bytes as strobes with an address
-// while busy; for a write it copies the sector from the track buffer of the C1541, whose data
-// come a clock after the address through a mux (OUT_LATENCY 2)
-wire [7:0] sdc_img_mounted;
-wire [63:0] sdc_img_size;
-wire [31:0] disk_lba;
-wire disk_rd, disk_wr;
-wire sdc_busy, sdc_done, sdc_error, sdc_byte_in_strobe;
-wire [2:0] sdc_slot;
-wire [8:0] sdc_byte_addr;
-wire [7:0] sdc_byte_in_data, disk_out_data;
-wire img_active;
-// the NVRAM of the Mega-Cart (index 7): its sector while only it asks (index 0, the drive, goes
-// first in img_sdc), its bytes while its request runs
-wire nv_rd, nv_wr;
-wire [3:0] nv_sector;
-wire [7:0] nv_out_data;
-wire [31:0] sdc_sector = (disk_rd || disk_wr) ? disk_lba : { 28'd0, nv_sector };
-wire [7:0] sdc_out_data = (sdc_slot == 3'd7) ? nv_out_data : disk_out_data;
-
-img_sdc #(.OUT_LATENCY(2)) img_sdc (
-	.clk(clk_sys),
-	.reset(areset),
-
-	.img_mounted(img_mounted),
-	.img_size(img_size),
-	.img_data_wr(img_data_wr),
-	.img_data_addr(img_data_addr),
-	.img_data(img_data),
-	.img_result_wr(img_result_wr),
-	.img_result(img_result),
-	.img_sum(img_sum),
-	.img_q_wr(img_q_wr),
-	.img_q_di(img_q_di),
-	.img_q_ack(img_q_ack),
-
-	.sdc_img_mounted(sdc_img_mounted),
-	.sdc_img_size(sdc_img_size),
-	.sdc_rd({ nv_rd, 6'd0, disk_rd }),
-	.sdc_wr({ nv_wr, 6'd0, disk_wr }),
-	.sdc_sector(sdc_sector),
-	.sdc_busy(sdc_busy),
-	.sdc_done(sdc_done),
-	.sdc_error(sdc_error),
-	.sdc_slot(sdc_slot),
-	.sdc_byte_in_strobe(sdc_byte_in_strobe),
-	.sdc_byte_addr(sdc_byte_addr),
-	.sdc_byte_in_data(sdc_byte_in_data),
-	.sdc_byte_out_data(sdc_out_data),
-
-	.active(img_active)
-);
+// the file mounter: kg_mcu2 (kg_l2_img) has the sd card interface of img_sdc; the nets are
+// declared before it (above)
 
 // a mount (sdc_img_mounted[0], one clock with the size; size 0 = ejected) is a disk change for
 // the C1541; an image of 333744 bytes or more is a G64 (upstream), a change of the kind resets
@@ -564,7 +539,7 @@ vic20_core machine (
 	.conf_ai(conf_ai),
 	.conf_di(conf_di),
 
-	// the C1541 on img_sdc (slot 0)
+	// the C1541 on the file mounter (slot 0)
 	.disk_reset(disk_reset),
 	.disk_pause(1'b0),
 	.disk_change(disk_change),
