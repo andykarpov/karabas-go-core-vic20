@@ -70,7 +70,7 @@ module karabas_mini_top (
 	input wire MCU_SCK,
 	inout wire MCU_MOSI,
 	output wire MCU_MISO,
-	inout wire [3:0] MCU_IO, // [0] burst cs_n, [1] burst ready, [2] sd2 cs_n, [3] ft cs_n
+	inout wire [3:0] MCU_IO, // [1] INT of link v2, [2] sd2 cs_n, [3] ft cs_n
 
 	output wire MIDI_TX,
 
