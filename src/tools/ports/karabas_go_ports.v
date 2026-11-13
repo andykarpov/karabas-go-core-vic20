@@ -76,7 +76,7 @@ module karabas_go_top (
 	output wire MCU_MISO,
 	input wire MCU_SPI_FT_CS_N,
 	input wire MCU_SPI_SD2_CS_N,
-	inout wire [1:0] MCU_SPI_IO, // [0] burst ready (firmware IO1, GPIO2), [1] burst cs_n (IO0, GPIO14)
+	inout wire [1:0] MCU_SPI_IO, // [0] INT of link v2 (firmware IO1, GPIO2), [1] unused (IO0, GPIO14)
 
 	output wire MIDI_TX,
 	output wire MIDI_CLK,

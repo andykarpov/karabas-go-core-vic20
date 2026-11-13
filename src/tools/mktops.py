@@ -7,7 +7,7 @@ of the boards, as core-atarist has them); the body gets the replacements below, 
 must match exactly once (a change of the Mini G text that one of them depends on fails here,
 instead of making a wrong top).
 
-  Mini (before rev.G): MCU_SCK not on a clock pin (no BUFG, bursts at the link clock), MCU_IO 4
+  Mini (before rev.G): MCU_SCK not on a clock pin (no BUFG), MCU_IO 4
       bits, ESP / MIDI / FT reset pins, sigma-delta audio (AUDIO_L / AUDIO_R) instead of the
       PCM5102; HDMI and FT_CLK_OUT as Mini G.
   Go: as Mini for the MCU link, and VGA (24-bit RGB to the DAC, the pixel clock on V_CLK, the
@@ -45,8 +45,6 @@ wire mcu_sck_ibufg, mcu_sck;
 IBUFG ibufg_mcu_sck (.I(MCU_SCK), .O(mcu_sck_ibufg));
 BUFG bufg_mcu_sck (.I(mcu_sck_ibufg), .O(mcu_sck));""", """// MCU_SCK is not on a clock pin before rev.G (CLOCK_DEDICATED_ROUTE = FALSE in the ucf)
 wire mcu_sck = MCU_SCK, mcu_sck_ibufg = MCU_SCK;""", 'mcu_sck')
-    s = sub(s, "	.BURST_MAX_MHZ(32),  // Rev.G has MCU_SCK on a global clock pin",
-            "	.BURST_MAX_MHZ(0),   // MCU_SCK is not on a clock pin: bursts at the link clock", 'burst')
     s = sub(s, "assign ESP32_SPI_CS_N = 1'b1;\n", """assign ESP_RESET_N = 1'bz;
 assign ESP_BOOT_N = 1'bz;
 assign MIDI_RESET_N = 1'b1;
@@ -77,12 +75,12 @@ def go(s):
     s = sub(s, " Commodore VIC-20 core for Karabas Mini rev.G (HDMI, PCM5102): the machine of VIC20Nano",
             " Commodore VIC-20 core for Karabas Go (VGA, PCM5102), made from karabas_minig_top.v by\n"
             " tools/mktops.py (edit that one): the machine of VIC20Nano", 'title')
-    s = sub(s, """assign MCU_IO[1] = mcu_burst_ready;
+    s = sub(s, """assign MCU_IO[1] = mcu_int;
 assign MCU_IO[0] = 1'bz;
-assign MCU_IO[5:2] = 4'bzzzz;""", """assign MCU_SPI_IO[0] = mcu_burst_ready;
+assign MCU_IO[5:2] = 4'bzzzz;""", """assign MCU_SPI_IO[0] = mcu_int;   // INT of link v2 on N9 (IO1 of the firmware)
 assign MCU_SPI_IO[1] = 1'bz;""", 'mcu_io')
-    s = sub(s, "	.MCU_SPI_FT_SS(MCU_IO[3]),\n	.MCU_SPI_SD2_SS(MCU_IO[2]),\n	.MCU_BURST_CS_N(MCU_IO[0]),",
-            "	.MCU_SPI_FT_SS(MCU_SPI_FT_CS_N),\n	.MCU_SPI_SD2_SS(MCU_SPI_SD2_CS_N),\n	.MCU_BURST_CS_N(MCU_SPI_IO[1]),", 'mcu_ss')
+    s = sub(s, "	.MCU_SPI_FT_SS(MCU_IO[3]),\n	.MCU_SPI_SD2_SS(MCU_IO[2]),",
+            "	.MCU_SPI_FT_SS(MCU_SPI_FT_CS_N),\n	.MCU_SPI_SD2_SS(MCU_SPI_SD2_CS_N),", 'mcu_ss')
     s = sub(s, "assign TAPE_OUT = 1'b0;\n", """assign TAPE_OUT = 1'b0;
 assign FT_OE_N = 1'b1;     // the FT812 does not drive the video DAC
 assign BEEPER = 1'b0;

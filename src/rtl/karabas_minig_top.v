@@ -25,7 +25,8 @@
  SRAM map (bytes): 000000 the VIC space, 0F0000 NVRAM (written, no longer read), 100000 tape,
  200000 Mega-Cart ROM.
  Mouse: Paddles = the two paddles of the VIC (x / y), the buttons their fire (joy left / right).
- Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through img_sdc.
+ Disk 8 (F item, slot 0): the C1541 reads and writes the .d64 (.g64) image through the file
+ mounter of kg_mcu2 (kg_l2_img, the sd card interface of img_sdc).
 
  Soft switches (the index of the item in the osd of core.json, the "index" of the items):
    6 RAM (None / 3K / 8K / 16K / 24K / 3K+24K / 35K)   7 Video (PAL / NTSC)   8 Disk 8 WP
@@ -184,152 +185,152 @@ wire mcu_sck_ibufg, mcu_sck;
 IBUFG ibufg_mcu_sck (.I(MCU_SCK), .O(mcu_sck_ibufg));
 BUFG bufg_mcu_sck (.I(mcu_sck_ibufg), .O(mcu_sck));
 
-wire mcu_burst_ready;
-assign MCU_IO[1] = mcu_burst_ready;
+// karabas: MCU link v2 (karabas-go-firmware docs/link_v2.md, kg_mcu2); INT on IO1
+wire mcu_int;
+assign MCU_IO[1] = mcu_int;
 assign MCU_IO[0] = 1'bz;
 assign MCU_IO[5:2] = 4'bzzzz;
 
 wire [7:0] kb_status, kb_dat0, kb_dat1, kb_dat2, kb_dat3, kb_dat4, kb_dat5;
-wire [7:0] uart_rx_data, uart_rx_idx, uart_tx_data;
-wire uart_tx_wr;
-wire [12:0] joy_l, joy_r;
-wire [7:0] ms_x, ms_y;
-wire [3:0] ms_z;
-wire [2:0] ms_b;
-wire ms_upd;
-wire rom_active, rom_wr;
-wire [31:0] rom_addr;
-wire [7:0] rom_data;
-wire file_reset, file_active, file_wr, file_on;
-wire [7:0] file_slot, file_data;
-wire [31:0] file_addr;
-wire [15:0] softsw_command, osd_command;
+wire [15:0] joy_l16, joy_r16;
+wire [12:0] joy_l = joy_l16[12:0], joy_r = joy_r16[12:0];
+wire [7:0] ms_x, ms_y, ms_b;
+wire ms_wr;
+wire [1:0] ld_kind;
+wire [7:0] ld_slot, ld_data;
+wire [31:0] ld_addr;
+wire ld_start, ld_active, ld_wr;
+wire [14*8-1:0] sw;
 wire mcu_busy;
 wire dvi_only;
 wire ft_cs_n, ft_mosi, ft_spi_on, sd2_cs_n, sd2_mosi;
-wire [7:0] img_mounted, img_data, img_result, img_wp;
-wire [63:0] img_size;
-wire img_data_wr, img_result_wr, img_q_wr, img_q_ack;
-wire [8:0] img_data_addr;
-wire [15:0] img_sum;
-wire [23:0] img_q_di;
-wire [7:0] rtc_a, rtc_do;
+wire osd_wr, osd_en, osd_zoom;
+wire [11:0] osd_waddr;
+wire [7:0] osd_wdata;
+wire [23:0] osd_fg, osd_bg;
+wire [1:0] osd_alpha, osd_place;
+wire [4:0] osd_px, osd_ph;
+wire [3:0] osd_py;
+wire [5:0] osd_pw;
 
-kg_mcu #(
-	.BURST_MAX_MHZ(32),  // Rev.G has MCU_SCK on a global clock pin
+// ------------------------------------------------------------------ Disk 8 (the nets)
+
+// the file mounter of kg_mcu2 (kg_l2_img, link v2) has the sd card interface of img_sdc, the one of
+// MiSTle that c1541_sd of VIC20Nano uses: the request held until sdc_busy, the sector bytes as strobes with an address
+// while busy; for a write it copies the sector from the track buffer of the C1541, whose data
+// come a clock after the address through a mux (OUT_LATENCY 2)
+wire [7:0] sdc_img_mounted, img_wp;
+wire [63:0] sdc_img_size;
+wire [31:0] disk_lba;
+wire disk_rd, disk_wr;
+wire sdc_busy, sdc_done, sdc_error, sdc_byte_in_strobe;
+wire [2:0] sdc_slot;
+wire [8:0] sdc_byte_addr;
+wire [7:0] sdc_byte_in_data, disk_out_data;
+wire img_active;
+// the NVRAM of the Mega-Cart (index 7): its sector while only it asks (index 0, the drive, goes
+// first), its bytes while its request runs
+wire nv_rd, nv_wr;
+wire [3:0] nv_sector;
+wire [7:0] nv_out_data;
+wire [31:0] sdc_sector = (disk_rd || disk_wr) ? disk_lba : { 28'd0, nv_sector };
+wire [7:0] sdc_out_data = (sdc_slot == 3'd7) ? nv_out_data : disk_out_data;
+
+kg_mcu2 #(
+	.CAPS(16'h0005),
+	.ENABLE_IMG(1),
+	.IMG_OUT_LATENCY(2),
+	.SW_N(14),
 	.CS_FILTER(3),
-	.ENABLE_RTC(0),
-	.ENABLE_UART(0),
-	.ENABLE_MATRIX(0),
-	.ENABLE_DEBUG(0),
-	.ENABLE_IMG(1),      // Disk 8 (slot 0)
-	.ENABLE_IMG_WP(1),   // a read only image: the disk is write protected
-	.ENABLE_FILE(1),
-	.FILE_CMDS(0),       // the ioctl commands of the FL items
-	.FILE_WR_EACH(1),
-	.FILE_TO_ROM(0),
 	.ENABLE_FT(1),
 	.ENABLE_SD2(1)
 ) mcu (
 	.CLK(clk_sys),
 	.N_RESET(~areset),
 
+	.MCU_SCK(mcu_sck),
 	.MCU_MOSI(MCU_MOSI),
 	.MCU_MISO(MCU_MISO),
-	.MCU_SCK(mcu_sck),
 	.MCU_SS(MCU_CS_N),
+	.MCU_INT(mcu_int),
 	.MCU_SPI_FT_SS(MCU_IO[3]),
 	.MCU_SPI_SD2_SS(MCU_IO[2]),
-	.MCU_BURST_CS_N(MCU_IO[0]),
-	.MCU_BURST_READY(mcu_burst_ready),
 
-	.KB_STATUS(kb_status),
-	.KB_DAT0(kb_dat0),
-	.KB_DAT1(kb_dat1),
-	.KB_DAT2(kb_dat2),
-	.KB_DAT3(kb_dat3),
-	.KB_DAT4(kb_dat4),
-	.KB_DAT5(kb_dat5),
-	.KB_SCANCODE(),
-	.KB_SCANCODE_UPD(),
-	.JOY_L(joy_l),
-	.JOY_R(joy_r),
+	.SW(sw),
+	.SW_WR(),
+	.SW_INDEX(),
+	.SW_VALUE(),
+	.HW_ID(),
+	.DVI_ONLY(dvi_only),
+	.CORE_BUILD(),
+	.FW_BUILD(),
+	.BUSY(mcu_busy),
+	.BTNS(),
+	.RELOAD_REQ(1'b0),
+	.RELOAD_CORE(8'd0),
+
+	.KBD({ kb_dat5, kb_dat4, kb_dat3, kb_dat2, kb_dat1, kb_dat0, kb_status }),
+	.KBD_WR(),
+	.PS2_CODE(),
+	.PS2_KIND(),
+	.PS2_WR(),
 	.MS_X(ms_x),
 	.MS_Y(ms_y),
-	.MS_Z(ms_z),
+	.MS_Z(),
 	.MS_B(ms_b),
-	.MS_UPD(ms_upd),
+	.MS_WR(ms_wr),
+	.JOY_L(joy_l16),
+	.JOY_R(joy_r16),
+	.JOY_WR(),
+	.PS2_CMD(16'h0000),
+	.PS2_CMD_WR(1'b0),
 
-	.ROMLOADER_ACTIVE(rom_active),
-	.ROMLOAD_ADDR(rom_addr),
-	.ROMLOAD_DATA(rom_data),
-	.ROMLOAD_WR(rom_wr),
+	.LD_KIND(ld_kind),
+	.LD_SLOT(ld_slot),
+	.LD_SIZE(),
+	.LD_START(ld_start),
+	.LD_ACTIVE(ld_active),
+	.LD_END(),
+	.LD_ADDR(ld_addr),
+	.LD_DATA(ld_data),
+	.LD_WR(ld_wr),
+	.LD_READY(1'b1),
 
-	.FILELOAD_RESET(file_reset),
-	.FILELOAD_ACTIVE(file_active),
-	.FILELOAD_ADDR(file_addr),
-	.FILELOAD_DATA(file_data),
-	.FILELOAD_WR(file_wr),
-	.FILELOAD_SLOT(file_slot),
+	.OSD_WR(osd_wr), .OSD_WADDR(osd_waddr), .OSD_WDATA(osd_wdata), .OSD_EN(osd_en),
+	.OSD_FG(osd_fg), .OSD_BG(osd_bg), .OSD_ALPHA(osd_alpha), .OSD_PX(osd_px), .OSD_PY(osd_py),
+	.OSD_PW(osd_pw), .OSD_PH(osd_ph), .OSD_PLACE(osd_place), .OSD_ZOOM(osd_zoom),
 
-	.SOFTSW_COMMAND(softsw_command),
-	.OSD_COMMAND(osd_command),
-	.BUSY(mcu_busy),
+	.SDC_IMG_MOUNTED(sdc_img_mounted), .SDC_IMG_SIZE(sdc_img_size),
+	.SDC_RD({ nv_rd, 6'd0, disk_rd }), .SDC_WR({ nv_wr, 6'd0, disk_wr }), .SDC_SECTOR(sdc_sector),
+	.SDC_BUSY(sdc_busy), .SDC_DONE(sdc_done), .SDC_ERROR(sdc_error), .SDC_SLOT(sdc_slot),
+	.SDC_BYTE_IN_STROBE(sdc_byte_in_strobe), .SDC_BYTE_ADDR(sdc_byte_addr),
+	.SDC_BYTE_IN_DATA(sdc_byte_in_data), .SDC_BYTE_OUT_DATA(sdc_out_data),
+	.IMG_WP(img_wp), .IMG_PHYS_WR(), .IMG_PHYS(), .IMG_FLUSH(), .FDD_CHNG_WR(), .FDD_CHNG(),
+	.FDD_CHNG_REQ(1'b0), .FDD_CHNG_DS(2'd0), .IMG_ACTIVE(img_active),
 
 	.FT_SPI_ON(ft_spi_on),
-	.FT_CS_N(ft_cs_n),
+	.FT_VGA_ON(),
+	.FT_RESET(),
+	.FT_SCK(),
 	.FT_MOSI(ft_mosi),
 	.FT_MISO(FT_SPI_MISO),
-	.FT_SCK(),
-	.SD2_CS_N(sd2_cs_n),
+	.FT_CS_N(ft_cs_n),
+	.SD2_SCK(),
 	.SD2_MOSI(sd2_mosi),
 	.SD2_MISO(SD_DO),
-	.SD2_SCK(),
-
-	.DVI_ONLY(dvi_only),
-
-	.MIDI_DATA(),
-	.MIDI_WR(),
-	.MIDI_LOST(),
-
-	// not used by this core
-	.PS2_COMMAND(16'h0000),
-	.PS2_COMMAND_WR(1'b0),
-	.RTC_A(rtc_a),
-	.RTC_DI(8'd0),
-	.RTC_DO(rtc_do),
-	.RTC_CS(1'b0),
-	.RTC_WR_N(1'b1),
-	.UART_RX_DATA(uart_rx_data),
-	.UART_RX_IDX(uart_rx_idx),
-	.UART_TX_DATA(uart_tx_data),
-	.UART_TX_WR(uart_tx_wr),
-	.UART_TX_MODE(1'b0),
-	.UART_DLM(8'h00),
-	.UART_DLL(8'h00),
-	.UART_DLM_WR(1'b0),
-	.UART_DLL_WR(1'b0),
-	.MATRIX_CMD(24'h000000),
-	.MATRIX_CMD_WR(1'b0),
-	.DEBUG_ADDR(16'h0000),
-	.DEBUG_DATA(16'h0000),
-	.IMG_MOUNTED(img_mounted),
-	.IMG_SIZE(img_size),
-	.IMG_WP(img_wp),
-	.IMG_DATA_WR(img_data_wr),
-	.IMG_DATA_ADDR(img_data_addr),
-	.IMG_DATA(img_data),
-	.IMG_RESULT_WR(img_result_wr),
-	.IMG_RESULT(img_result),
-	.IMG_SUM(img_sum),
-	.IMG_Q_WR(img_q_wr),
-	.IMG_Q_DI(img_q_di),
-	.IMG_Q_ACK(img_q_ack),
-	.ESP_UART_RX_DATA(8'h00),
-	.ESP_UART_RX_WR(1'b0),
-	.FLASHBOOT_START(1'b0),
-	.FLASHBOOT_COREID(5'd0)
+	.SD2_CS_N(sd2_cs_n)
 );
+
+// the FL items (LD kind 2) on the file signals of vic20_loader / vic20_tape: a new file
+// (LD_START) is the file reset, the bytes go as they come
+wire ld_fl = ld_kind == 2'd2;
+wire file_reset = ld_start && ld_fl;
+wire file_active = ld_active && ld_fl;
+wire file_wr = ld_wr && ld_fl;
+wire [7:0] file_slot = ld_slot, file_data = ld_data;
+wire [31:0] file_addr = ld_addr;
+wire file_on;
+
 
 assign FT_SPI_CS_N = ft_spi_on ? ft_cs_n : 1'b1;
 assign FT_SPI_SCK = ft_spi_on ? mcu_sck_ibufg : 1'b1;
@@ -340,13 +341,7 @@ assign SD_CLK = mcu_sck_ibufg;
 
 // ------------------------------------------------------------------ soft switches
 
-wire [14*8-1:0] sw;
-kg_soft_switches #(.N(14)) soft_switches (
-	.clk(clk_sys),
-	.command(softsw_command),
-	.regs(sw),
-	.upd()
-);
+// the switches: the SW registers of kg_mcu2
 wire [2:0] sw_ram = sw[6*8 +: 3];
 assign sw_ntsc = sw[7*8];
 wire sw_disk_wp = sw[8*8];
@@ -464,59 +459,8 @@ vic20_tape tape (
 
 // ------------------------------------------------------------------ Disk 8
 
-// img_sdc (the file mounter of the mcu) has the sd card interface of MiSTle that c1541_sd of
-// VIC20Nano uses: the request held until sdc_busy, the sector bytes as strobes with an address
-// while busy; for a write it copies the sector from the track buffer of the C1541, whose data
-// come a clock after the address through a mux (OUT_LATENCY 2)
-wire [7:0] sdc_img_mounted;
-wire [63:0] sdc_img_size;
-wire [31:0] disk_lba;
-wire disk_rd, disk_wr;
-wire sdc_busy, sdc_done, sdc_error, sdc_byte_in_strobe;
-wire [2:0] sdc_slot;
-wire [8:0] sdc_byte_addr;
-wire [7:0] sdc_byte_in_data, disk_out_data;
-wire img_active;
-// the NVRAM of the Mega-Cart (index 7): its sector while only it asks (index 0, the drive, goes
-// first in img_sdc), its bytes while its request runs
-wire nv_rd, nv_wr;
-wire [3:0] nv_sector;
-wire [7:0] nv_out_data;
-wire [31:0] sdc_sector = (disk_rd || disk_wr) ? disk_lba : { 28'd0, nv_sector };
-wire [7:0] sdc_out_data = (sdc_slot == 3'd7) ? nv_out_data : disk_out_data;
-
-img_sdc #(.OUT_LATENCY(2)) img_sdc (
-	.clk(clk_sys),
-	.reset(areset),
-
-	.img_mounted(img_mounted),
-	.img_size(img_size),
-	.img_data_wr(img_data_wr),
-	.img_data_addr(img_data_addr),
-	.img_data(img_data),
-	.img_result_wr(img_result_wr),
-	.img_result(img_result),
-	.img_sum(img_sum),
-	.img_q_wr(img_q_wr),
-	.img_q_di(img_q_di),
-	.img_q_ack(img_q_ack),
-
-	.sdc_img_mounted(sdc_img_mounted),
-	.sdc_img_size(sdc_img_size),
-	.sdc_rd({ nv_rd, 6'd0, disk_rd }),
-	.sdc_wr({ nv_wr, 6'd0, disk_wr }),
-	.sdc_sector(sdc_sector),
-	.sdc_busy(sdc_busy),
-	.sdc_done(sdc_done),
-	.sdc_error(sdc_error),
-	.sdc_slot(sdc_slot),
-	.sdc_byte_in_strobe(sdc_byte_in_strobe),
-	.sdc_byte_addr(sdc_byte_addr),
-	.sdc_byte_in_data(sdc_byte_in_data),
-	.sdc_byte_out_data(sdc_out_data),
-
-	.active(img_active)
-);
+// the file mounter: kg_mcu2 (kg_l2_img) has the sd card interface of img_sdc; the nets are
+// declared before it (above)
 
 // a mount (sdc_img_mounted[0], one clock with the size; size 0 = ejected) is a disk change for
 // the C1541; an image of 333744 bytes or more is a G64 (upstream), a change of the kind resets
@@ -595,7 +539,7 @@ vic20_core machine (
 	.conf_ai(conf_ai),
 	.conf_di(conf_di),
 
-	// the C1541 on img_sdc (slot 0)
+	// the C1541 on the file mounter (slot 0)
 	.disk_reset(disk_reset),
 	.disk_pause(1'b0),
 	.disk_change(disk_change),
@@ -742,12 +686,11 @@ vic20_hid hid (
 // left / right button is the fire of paddle x / y (joystick left / right lines, as on the VIC);
 // Off: the pots at 255 (no paddles), the buttons not used
 reg [7:0] pad_x = 8'd128, pad_y = 8'd128;
-reg ms_upd_d = 1'b0;
+
 wire [8:0] pad_x_n = { 1'b0, pad_x } + { ms_x[7], ms_x };
 wire [8:0] pad_y_n = { 1'b0, pad_y } - { ms_y[7], ms_y };
 always @(posedge clk_sys) begin
-	ms_upd_d <= ms_upd;
-	if (ms_upd != ms_upd_d) begin
+	if (ms_wr) begin
 		// clamp: an overflow of the 9-bit sum is the sign of the delta
 		pad_x <= pad_x_n[8] ? (ms_x[7] ? 8'd0 : 8'd255) : pad_x_n[7:0];
 		pad_y <= pad_y_n[8] ? (ms_y[7] ? 8'd255 : 8'd0) : pad_y_n[7:0];
@@ -814,22 +757,18 @@ always @(posedge clk_sys) begin
 	vid_vs <= !sd_vs_n;
 end
 
-// the OSD of the mcu (512 x 416: a step per 2 clocks, per 2 lines) in the middle of de:
-//   PAL  clocks 195 + (912 - 512) / 2 = 395, lines 46 + (576 - 416) / 2 = 126
-//   NTSC clocks 179 + (816 - 512) / 2 = 331, lines 36 + (480 - 416) / 2 = 68
-reg [15:0] osd_cmd = 16'd0;
-always @(posedge clk_sys)
-	osd_cmd <= osd_command;
+// the bitmap OSD of link v2 (kg_l2_osd_overlay): centred in de, the scale from its size (2 at
+// 720 x 576 / 720 x 480), 2 clocks of latency with its syncs and de
 wire [23:0] osd_rgb;
-kg_osd_overlay #(.H_DIV4_WIDTH(1200), .H_OFFSET_IN(1), .V_OFFSET_IN(1)) osd (
+wire osd_hs, osd_vs, osd_de;
+kg_l2_osd_overlay osd (
+	.wclk(clk_sys),
+	.osd_wr(osd_wr), .osd_waddr(osd_waddr), .osd_wdata(osd_wdata), .osd_en(osd_en),
+	.osd_fg(osd_fg), .osd_bg(osd_bg), .osd_alpha(osd_alpha), .osd_px(osd_px), .osd_py(osd_py),
+	.osd_pw(osd_pw), .osd_ph(osd_ph), .osd_place(osd_place), .osd_zoom(osd_zoom),
 	.clk(clk_sys),
-	.rgb_i(vid_rgb),
-	.rgb_o(osd_rgb),
-	.hsync_i(vid_hs),
-	.vsync_i(vid_vs),
-	.v_offset(ntsc ? 11'd34 : 11'd63),
-	.h_offset(ntsc ? 11'd165 : 11'd197),
-	.osd_command(osd_cmd)
+	.rgb_i(vid_rgb), .hs_i(vid_hs), .vs_i(vid_vs), .de_i(vid_de),
+	.rgb_o(osd_rgb), .hs_o(osd_hs), .vs_o(osd_vs), .de_o(osd_de)
 );
 
 // ------------------------------------------------------------------ audio
@@ -874,9 +813,9 @@ hdmi_tx #(.SAMPLE_FREQ(48000)) hdmi (
 	.sclk_n(clk_x5_n),
 	.reset(areset || std_rst != 8'd0),
 	.rgb(osd_rgb),
-	.vsync(~vid_vs),
-	.hsync(~vid_hs),
-	.de(vid_de),
+	.vsync(~osd_vs),
+	.hsync(~osd_hs),
+	.de(osd_de),
 	.audio_en(~dvi_only),
 	.audio_l(hdmi_a),
 	.audio_r(hdmi_a),
