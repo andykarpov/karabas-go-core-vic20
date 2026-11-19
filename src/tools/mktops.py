@@ -104,8 +104,8 @@ assign FDC_SIDE_N = 1'b0;
 reg [1:0] ft_div = 2'd0;
 always @(posedge clk_sys)
 	ft_div <= ft_div + 2'd1;
-assign FT_CLK_OUT = ft_div[1];""", """// the pixel clock of the VGA DAC
-ODDR2 oddr_v_clk (.Q(V_CLK), .C0(clk_sys), .C1(~clk_sys), .CE(1'b1), .D0(1'b1), .D1(1'b0), .R(1'b0), .S(1'b0));""", 'v_clk')
+assign FT_CLK_OUT = ft_div[1];""", """// the pixel clock of the VGA DAC, inverted: the DAC takes the pixel on the rising V_CLK, the middle of the pixel
+ODDR2 oddr_v_clk (.Q(V_CLK), .C0(clk_sys), .C1(~clk_sys), .CE(1'b1), .D0(1'b0), .D1(1'b1), .R(1'b0), .S(1'b0));""", 'v_clk')
     s = sub(s, ".lrck(DAC_WS)\n);", ".lrck(DAC_LRCK)\n);\nassign DAC_MUTE = 1'b1;  // soft mute of the PCM5102: 1 = sound on", 'dac')
     i = s.index('// 48 kHz for hdmi_tx:')
     j = s.index('endmodule')
